@@ -1,0 +1,21 @@
+body {
+  min-height: 100vh;
+}
+
+#app {
+  display: grid;
+  justify-items: center;
+  padding: 12px;
+}
+
+/* The window is the dialog: no second frame inside it. */
+#app .pnl-share {
+  width: 100%;
+  border: 0;
+  padding: 4px 6px 8px;
+  background: transparent;
+}
+
+#app > p {
+  padding: 24px 8px;
+}

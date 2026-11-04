@@ -1,0 +1,569 @@
+/* ── wallets ───────────────────────────────────────────────────────── */
+/* Portfolio card: what the selected wallets hold on this chain, and what to do with it. */
+.port {
+  padding: 16px;
+  display: grid;
+  gap: 4px;
+  border: 0;
+  border-radius: 16px;
+}
+
+.pnl-line {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.pnl-line.up,
+.wl-val small.up {
+  color: var(--buy);
+}
+
+.pnl-line.down,
+.wl-val small.down {
+  color: var(--sell);
+}
+
+/* The open-PnL line of a token opens its PnL card. */
+button.pnl-line {
+  justify-self: start;
+  margin: -3px -6px;
+  padding: 3px 6px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+
+button.pnl-line.up:hover {
+  background: var(--buy-bg);
+  box-shadow: inset 0 0 0 1px var(--buy-line);
+}
+
+button.pnl-line.down:hover {
+  background: var(--sell-bg);
+  box-shadow: inset 0 0 0 1px var(--sell-line);
+}
+
+button.pnl-line:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+}
+
+.port .wname {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.port .big {
+  margin-top: 4px;
+}
+
+/* Wallet switcher in the card's header: one line however many wallets there are. */
+.wsw {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  max-width: 60%;
+  margin: -4px 0 -4px -4px;
+  padding: 4px 8px 4px 4px;
+  border: 0;
+  border-radius: 10px;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  cursor: pointer;
+  transition: background-color var(--dur-fast) ease;
+}
+
+.wsw:hover {
+  background: var(--surface-2);
+}
+
+.wsw .wname {
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.wsw svg {
+  flex: none;
+}
+
+.wl-tile--sm {
+  width: 22px;
+  height: 22px;
+  border-radius: 7px;
+  font-size: 12px;
+}
+
+.wl-tile--all {
+  background: var(--surface-2);
+  color: var(--light);
+  box-shadow: inset 0 0 0 1px var(--border-strong);
+}
+
+.wl-sheet {
+  max-height: 50vh;
+  overflow-y: auto;
+  padding: 4px 12px 8px;
+}
+
+.wl-sheet-foot {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 4px 16px 14px;
+}
+
+.wl-sheet-note {
+  margin: 0;
+  padding: 2px 16px 6px;
+}
+
+/* Wallet list: one row per wallet; picking one filters the card and tokens to it. */
+.wl {
+  display: grid;
+  gap: 8px;
+}
+
+.wl-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.wl-row {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: #131a26;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    border-color var(--dur-fast) ease,
+    transform var(--dur-fast) var(--ease-out);
+}
+
+.wl-row:hover {
+  border-color: var(--border-strong);
+}
+
+.wl-row:active {
+  transform: scale(0.99);
+}
+
+.wl-row[aria-pressed='true'] {
+  border-color: var(--accent);
+}
+
+.wl-row.is-hidden {
+  opacity: 0.6;
+}
+
+.wl-tile {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  color: var(--bg);
+  font: 700 15px/1 var(--num);
+}
+
+.wl-main {
+  display: grid;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+
+.wl-name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.wl-addr {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.wl-val {
+  display: grid;
+  justify-items: end;
+  gap: 2px;
+  font: 600 17px/1.1 var(--num);
+  white-space: nowrap;
+}
+
+.wl-val small {
+  color: var(--muted);
+  font: 600 11px/1 var(--ui);
+}
+
+.addr-btn {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+  border: 0;
+  padding: 0;
+  background: none;
+  color: var(--muted);
+  font-size: 11.5px;
+  cursor: pointer;
+}
+
+.toks {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+}
+
+/* Same card as a wallet row, so the page reads as one list style. */
+.tok {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: #131a26;
+  transition: border-color var(--dur-fast) ease;
+}
+
+.tok:has(.tok-main:not(.static):hover) {
+  border-color: var(--border-strong);
+}
+
+.tok-main {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 34px 1fr auto;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  border: 0;
+  border-radius: var(--radius-lg);
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.tok-main.static {
+  cursor: default;
+}
+
+.tok.is-dust .tok-main {
+  opacity: 0.6;
+}
+
+.av {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  object-fit: cover;
+  color: #fff;
+  font-weight: 800;
+  font-size: 13px;
+  background: var(--surface-2);
+}
+
+.tname,
+.tval {
+  display: grid;
+  gap: 2px;
+  font-weight: 600;
+  min-width: 0;
+}
+
+.tval {
+  font: 600 17px/1.1 var(--num);
+}
+
+.tname small,
+.tval small {
+  font: 500 12px/1.2 var(--ui);
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tval {
+  text-align: right;
+}
+
+.tok-actions {
+  display: flex;
+  gap: 6px;
+  padding: 0 12px 12px 58px;
+}
+
+.tok-actions .btn {
+  text-decoration: none;
+}
+
+.tok-spam {
+  flex-direction: column;
+  align-items: flex-start;
+}
+
+.tok-spam .hint {
+  margin: 0;
+}
+
+.tok-confirm {
+  margin: 0 12px 12px 58px;
+  font-size: 12px;
+}
+
+.btn--sell {
+  border-color: color-mix(in srgb, var(--sell) 60%, transparent);
+  color: var(--sell);
+  background: transparent;
+}
+
+.dust {
+  display: flex;
+  align-items: center;
+  padding: 8px 10px;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius);
+  background: none;
+  color: var(--faint);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.showlink {
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.wallet-acts {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.wact {
+  display: grid;
+  justify-items: center;
+  gap: 5px;
+  padding: 10px 0;
+  border: 0;
+  border-radius: 12px;
+  background: var(--surface-2);
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    background-color var(--dur-fast) ease,
+    transform var(--dur-fast) var(--ease-out);
+}
+
+.wact svg {
+  color: var(--accent);
+}
+
+.wact:hover {
+  background: var(--border-strong);
+}
+
+.wact:active {
+  transform: scale(0.96);
+}
+
+.wact:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.add-ico {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  flex: none;
+  border-radius: 10px;
+  background: var(--surface-2);
+  color: var(--muted);
+}
+
+.add-ico.accent {
+  color: var(--accent);
+}
+
+.tok .av {
+  width: 34px;
+  height: 34px;
+}
+
+/* ── wallet groups ─────────────────────────────────────────────────── */
+.grp-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.grp-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 8px 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: #131a26;
+}
+
+.grp-key {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 7px;
+  background: var(--surface-2);
+  color: var(--accent);
+  font: 700 12px/1 var(--num);
+}
+
+.grp-main {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+  border: 0;
+  padding: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.grp-name {
+  font-weight: 600;
+}
+
+.grp-main small {
+  color: var(--muted);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.grp-move {
+  display: flex;
+  flex: none;
+}
+
+.grp-move .icon-btn:disabled {
+  opacity: 0.3;
+}
+
+.grp-modes {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.grp-modes button {
+  height: 32px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--light);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.grp-modes button[aria-checked='true'] {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.grp-edit .label {
+  display: flex;
+  align-items: center;
+}
+
+.grp-wallets {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.grp-w {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.grp-w span:first-of-type {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.grp-w.on {
+  border-color: var(--accent);
+}
+
+.grp-w input {
+  accent-color: var(--accent);
+  margin: 0;
+}
+
+.grp-acts {
+  gap: 8px;
+}
+
+.grp-skel {
+  height: 56px;
+  border-radius: var(--radius-lg);
+}

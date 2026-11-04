@@ -1,0 +1,64 @@
+body {
+  min-height: 100vh;
+}
+
+#app {
+  display: grid;
+  gap: 16px;
+  padding: 20px 18px;
+}
+
+.who {
+  display: grid;
+  gap: 4px;
+  padding: 12px 14px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+}
+
+.who .origin {
+  font-family: var(--mono);
+  font-size: 13px;
+  word-break: break-all;
+}
+
+.what {
+  display: grid;
+  gap: 8px;
+  padding: 14px;
+  border-radius: var(--radius-lg);
+  background: var(--surface-2);
+}
+
+.what .usd {
+  font-family: var(--num);
+  font-size: 22px;
+  font-weight: 700;
+}
+
+.grants {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding-left: 18px;
+  color: var(--light);
+}
+
+.why {
+  color: var(--warn);
+}
+
+/* An outside address in full: every character is the user's to check. */
+.what .address {
+  font-family: var(--mono);
+  font-size: 13px;
+  line-height: 1.5;
+  word-break: break-all;
+}
+
+.actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}

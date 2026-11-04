@@ -1,0 +1,272 @@
+/* Popup frame and the pieces every screen uses (rows, tags, tabs, titles). */
+
+body {
+  width: 360px;
+  height: 600px;
+  overflow: hidden;
+}
+
+.popup {
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  height: 600px;
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+.topbar h1 {
+  font-size: 18px;
+}
+
+/* Fixed rows, so screens without the top bar (trade detail, Settings) keep the layout. */
+.topbar {
+  grid-row: 1;
+}
+
+.content {
+  grid-row: 2;
+  overflow-x: hidden;
+  overflow-y: auto;
+  min-height: 0;
+  padding: 14px;
+}
+
+/* A screen enters from the side it comes from: deeper screens from the right, going back
+   from the left, tabs in bar order. */
+.screen {
+  display: grid;
+  align-content: start;
+  gap: 14px;
+  animation: screen-in 160ms var(--ease-out) both;
+}
+
+.screen[data-motion='push'],
+.screen[data-motion='next'] {
+  --from: 8px;
+}
+
+.screen[data-motion='pop'],
+.screen[data-motion='prev'] {
+  --from: -8px;
+}
+
+@keyframes screen-in {
+  from {
+    opacity: 0;
+    transform: translateX(var(--from, 0));
+  }
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+}
+
+.icon-btn {
+  display: inline-grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  cursor: pointer;
+  transition:
+    transform var(--dur-fast) var(--ease-out),
+    background-color var(--dur-fast) ease;
+}
+
+.icon-btn:hover {
+  color: var(--text);
+  background: var(--surface);
+}
+
+.icon-btn:active {
+  transform: scale(0.9);
+}
+
+.icon-btn:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.wallets {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.wallet {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: #131a26;
+  transition:
+    border-color var(--dur-fast) ease,
+    transform var(--dur-fast) var(--ease-out);
+}
+
+.wallet:hover {
+  border-color: var(--border-strong);
+}
+
+.wallet:active {
+  transform: scale(0.99);
+}
+
+.wallet__main {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+  text-align: left;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.wallet__main:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 4px;
+  border-radius: 4px;
+}
+
+.wallet__name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.wallet__addr {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.tag {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 5px;
+  border-radius: 4px;
+  border: 1px solid var(--border-strong);
+  color: var(--muted);
+}
+
+.tag--primary {
+  border-color: transparent;
+  background: #173a2e;
+  color: var(--accent);
+}
+
+.section-title {
+  font-family: var(--num);
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.danger-zone {
+  padding: 14px;
+  border: 1px solid var(--sell-line);
+  border-radius: var(--radius-lg);
+  background: var(--sell-bg);
+  display: grid;
+  gap: 10px;
+}
+
+.center {
+  display: grid;
+  place-items: center;
+  text-align: center;
+  gap: 12px;
+  padding: 32px 8px;
+}
+
+/* Segmented tabs. The selected one is a raised chip that slides over (see SegTabs). */
+.seg-tabs {
+  position: relative;
+  display: flex;
+  gap: 2px;
+  padding: 3px;
+  border-radius: 11px;
+  background: var(--surface);
+}
+
+.seg-tabs button {
+  position: relative;
+  z-index: 1;
+  flex: 1;
+  height: 32px;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  color: var(--light);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    color var(--dur-fast) ease,
+    transform var(--dur-fast) var(--ease-out);
+}
+
+.seg-tabs button:active {
+  transform: scale(0.96);
+}
+
+.seg-tabs button[aria-selected='true'] {
+  color: #fff;
+  font-weight: 700;
+}
+
+.seg-tabs .seg-ind {
+  position: absolute;
+  z-index: 0;
+  top: 3px;
+  bottom: 3px;
+  left: 3px;
+  border-radius: 8px;
+  background: var(--border-strong);
+  transition: transform 200ms var(--ease-out);
+}
+
+.grid2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+fieldset.card {
+  margin: 0;
+}
+
+legend.section-title {
+  padding: 0 4px;
+}
+
+/* A settings tab's content fades up when the tab changes. */
+.tab-pane {
+  display: grid;
+  gap: 12px;
+  animation: fade-in 140ms ease-out both;
+}

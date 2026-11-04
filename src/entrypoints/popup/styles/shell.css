@@ -1,0 +1,110 @@
+/* ── shell ─────────────────────────────────────────────────────────── */
+
+.nav {
+  grid-row: 3;
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  border-top: 1px solid var(--border);
+  background: #0c1119;
+}
+
+/* One bar that slides to the active tab. */
+.nav-ind {
+  position: absolute;
+  top: -1px;
+  left: 0;
+  width: 25%;
+  height: 2px;
+  pointer-events: none;
+  transition:
+    transform 220ms var(--ease-out),
+    opacity var(--dur-base) ease;
+}
+
+.nav-ind::before {
+  content: '';
+  position: absolute;
+  inset: 0 28%;
+  border-radius: 0 0 2px 2px;
+  background: var(--accent);
+}
+
+.nav-item {
+  position: relative;
+  display: grid;
+  justify-items: center;
+  gap: 3px;
+  padding: 9px 0 10px;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: color var(--dur-fast) ease;
+}
+
+.nav-item svg {
+  transition: transform var(--dur-fast) var(--ease-out);
+}
+
+.nav-item:hover {
+  color: var(--light);
+}
+
+.nav-item:active svg {
+  transform: scale(0.92);
+}
+
+.nav-item[aria-current='page'] {
+  color: var(--accent);
+  font-weight: 700;
+}
+
+@keyframes nav-pop {
+  from {
+    transform: scale(0.8);
+  }
+}
+
+.nav-item:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
+}
+
+.badge-dot {
+  position: absolute;
+  top: 4px;
+  left: calc(50% + 6px);
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 8px;
+  background: var(--warn);
+  color: #1a1000;
+  animation: nav-pop 360ms var(--ease-spring);
+  font-size: 10px;
+  line-height: 16px;
+  text-align: center;
+}
+
+.small {
+  font-size: 12px;
+}
+
+.link {
+  border: 0;
+  padding: 0;
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.input {
+  min-width: 0;
+}

@@ -1,0 +1,205 @@
+/* Sharing a PnL card: the extension's window and the website's dialog. Each page's own
+   tokens come first (the website's, then the extension's), with the card's colours last. */
+.pnl-share {
+  --ps-surface: var(--panel, var(--surface, #131124));
+  --ps-well: var(--deck, var(--bg, #0d0b18));
+  --ps-raised: var(--raised, var(--surface-2, #1b182f));
+  --ps-line: var(--line, var(--border, #272341));
+  --ps-line-strong: var(--line-strong, var(--border-strong, #363060));
+  --ps-action: var(--signal, var(--accent, #2ee6a8));
+  --ps-action-hot: var(--signal-hot, var(--accent-hot, #6af0c3));
+  --ps-action-ink: var(--signal-ink, var(--accent-ink, #04150d));
+  --ps-pick: var(--pick, var(--accent, #9b8cff));
+  display: grid;
+  gap: 16px;
+  box-sizing: border-box;
+  width: min(680px, 100%);
+  padding: 14px 20px 20px;
+  border: 1px solid var(--ps-line-strong);
+  border-radius: 14px;
+  background: var(--ps-surface);
+  color: var(--text, #f3f1ff);
+  font-family: var(--ui);
+}
+
+.pnl-share-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: -4px;
+}
+
+.pnl-share-head h2 {
+  margin: 0;
+  font: 700 22px/1.2 var(--num);
+}
+
+.pnl-share-x {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.pnl-share-x:hover {
+  background: var(--ps-raised);
+  color: var(--text, #f3f1ff);
+}
+
+.pnl-share-card {
+  display: block;
+  width: 100%;
+  height: auto;
+  aspect-ratio: 16 / 9;
+  border-radius: 10px;
+  background: #08070f;
+  box-shadow: 0 0 0 1px var(--ps-line);
+}
+
+.pnl-share-opts {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px 22px;
+}
+
+.pnl-share-unit {
+  display: inline-flex;
+  padding: 3px;
+  border: 1px solid var(--ps-line);
+  border-radius: 10px;
+  background: var(--ps-well);
+}
+
+.pnl-share-unit button {
+  height: 30px;
+  min-width: 62px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--muted);
+  font: 700 15px var(--num);
+  cursor: pointer;
+}
+
+.pnl-share-unit button[aria-pressed='true'] {
+  background: var(--ps-line);
+  color: var(--text, #f3f1ff);
+}
+
+.pnl-share-unit button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.pnl-share-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--light, #cdc8ee);
+  font: inherit;
+  font-size: 15px;
+  cursor: pointer;
+}
+
+.pnl-share-track {
+  position: relative;
+  flex: none;
+  box-sizing: border-box;
+  width: 42px;
+  height: 24px;
+  border: 1px solid var(--ps-line-strong);
+  border-radius: 999px;
+  background: var(--ps-well);
+}
+
+.pnl-share-track span {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--muted);
+  transition: transform 160ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.pnl-share-switch[aria-checked='true'] .pnl-share-track {
+  border-color: var(--ps-pick);
+  background: color-mix(in srgb, var(--ps-pick) 16%, transparent);
+}
+
+.pnl-share-switch[aria-checked='true'] .pnl-share-track span {
+  background: var(--ps-pick);
+  transform: translateX(18px);
+}
+
+.pnl-share-actions {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.pnl-share-actions button {
+  height: 44px;
+  padding: 0 14px;
+  border: 1px solid var(--ps-line-strong);
+  border-radius: 10px;
+  background: var(--ps-raised);
+  color: var(--text, #f3f1ff);
+  font: 700 17px var(--num);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.pnl-share-actions button:hover {
+  border-color: var(--muted);
+}
+
+.pnl-share-actions .pnl-share-main {
+  border-color: var(--ps-action);
+  background: var(--ps-action);
+  color: var(--ps-action-ink);
+}
+
+.pnl-share-actions .pnl-share-main:hover {
+  border-color: var(--ps-action-hot);
+  background: var(--ps-action-hot);
+}
+
+.pnl-share button:focus-visible {
+  outline: 2px solid var(--ps-action);
+  outline-offset: 2px;
+}
+
+.pnl-share-note {
+  margin: -4px 0 0;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+@media (max-width: 520px) {
+  .pnl-share {
+    padding: 12px 14px 16px;
+  }
+
+  .pnl-share-actions {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pnl-share-track span {
+    transition: none;
+  }
+}

@@ -1,0 +1,17 @@
+/* ── type: numbers in DIN ─────────────────────────────────────────── */
+.topbar h1,
+.port .big,
+.tval,
+.amt-input,
+.amt-out,
+.act .r1,
+.pill {
+  font-family: var(--num);
+}
+
+.port .big {
+  font-weight: 600;
+  font-size: 38px;
+  line-height: 1;
+  letter-spacing: 0;
+}
