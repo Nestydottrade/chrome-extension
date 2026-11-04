@@ -26,28 +26,46 @@ describe('the Nesty website', () => {
     vi.resetModules();
   });
 
-  it('is the local development server, exactly, outside the store build', async () => {
+  it('is the hosted site and, outside the store build, the local development server', async () => {
     const s = await site();
+    expect(s.isNestySite('https://nesty.trade')).toBe(true);
     expect(s.isNestySite('http://localhost:5173')).toBe(true);
     expect(s.isNestySite('http://127.0.0.1:5173')).toBe(true);
     expect(s.isNestySite('http://localhost:5174')).toBe(false);
     expect(s.isNestySite('https://localhost:5173')).toBe(false);
-    expect(s.NESTY_SITE_MATCHES).toEqual(['http://localhost/*', 'http://127.0.0.1/*']);
+    expect(s.NESTY_SITE_MATCHES).toEqual([
+      'https://nesty.trade/*',
+      'http://localhost/*',
+      'http://127.0.0.1/*',
+    ]);
   });
 
-  it('is nowhere in the store build', async () => {
+  it('is the hosted site only in the store build', async () => {
     const s = await site(true);
-    expect(s.NESTY_SITE_ORIGINS).toEqual([]);
-    expect(s.NESTY_SITE_MATCHES).toEqual([]);
+    expect(s.NESTY_SITE_ORIGINS).toEqual(['https://nesty.trade']);
+    expect(s.NESTY_SITE_MATCHES).toEqual(['https://nesty.trade/*']);
     expect(s.isNestySite('http://localhost:5173')).toBe(false);
     expect(s.isNestySite('http://127.0.0.1:5173')).toBe(false);
   });
 
-  it('decides whether the manifest asks for notifications (its price alerts)', async () => {
+  it('is that exact origin: no other scheme, host or port', async () => {
+    for (const store of [false, true]) {
+      const s = await site(store);
+      for (const origin of [
+        'http://nesty.trade',
+        'https://www.nesty.trade',
+        'https://nesty.trade:8443',
+        'https://nesty.trade.example.com',
+        'https://evilnesty.trade',
+      ])
+        expect(s.isNestySite(origin)).toBe(false);
+    }
+  });
+
+  it('asks for notifications, for its price alerts, in every build', async () => {
     const normal = await permissions(false);
     const store = await permissions(true);
     expect(normal).toContain('notifications');
-    expect(store).not.toContain('notifications');
-    expect(store).toEqual(normal.filter((p) => p !== 'notifications'));
+    expect(store).toEqual(normal);
   });
 });

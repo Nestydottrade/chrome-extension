@@ -134,19 +134,20 @@ finds coins, quotes, builds and sends its own trades with Nesty's code (Solana, 
 EVM engine with its venues, gas and nonce handling), and asks the extension to sign each
 one. On every other site the extension works as described above.
 
-- The site is recognised by its exact origin, listed in `src/shared/nesty-site.ts`.
-  Only the local development server (`http://localhost:5173`) is listed so far: add the
-  hosted site's origin there before publishing it. A content script on that origin
-  carries window messages to the background and does nothing else.
-- The build for the Chrome Web Store (`pnpm build:store`) trusts no local server, so
-  until the hosted origin is listed it has no Nesty website at all: no content script for
-  it, and no notifications permission, since only the site sets price alerts.
+- The site is recognised by its exact origin, listed in `src/shared/nesty-site.ts`:
+  `https://nesty.trade` in every build, and the local development server
+  (`http://localhost:5173`) in every build but the store's (`pnpm build:store`). A
+  content script on those origins carries window messages to the background and does
+  nothing else.
 - What the site may ask for: whether Nesty is there (with the user's limits), a
   connection (approved once per site in an extension window), the wallets' names and
   public addresses, the unlock window, a signature on a trade or on a new coin
-  (`site.sol.sign`, `site.evm.sign`, `site.evm.permit`), and a bridge
-  (`site.bridge.quote`, `site.bridge.send`, `site.bridge.status`). It can never read a
-  key, export one, change settings, or get anything else signed: no transfers or revokes.
+  (`site.sol.sign`, `site.evm.sign`, `site.evm.permit`), a bridge
+  (`site.bridge.quote`, `site.bridge.send`, `site.bridge.status`), and price alerts
+  (`site.alerts.list`, `site.alerts.set`, `site.alerts.remove`), which the extension
+  keeps and checks every 30 seconds, with a notification when one is reached. It can
+  never read a key, export one, change settings, or get anything else signed: no
+  transfers or revokes.
 - Every Solana trade it sends is checked as the panel's are: the route is read again
   from the chain, the Solana validator runs with the user's limits, and the minimum
   received must be at least half of what Nesty's own quote pays. A coin quoted in a

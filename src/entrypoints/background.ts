@@ -34,7 +34,7 @@ import type { PushEvent } from '../shared/messages';
 import type { TradeTicket } from '../shared/panel';
 import { SHARE_KEY, type PnlCard } from '../shared/pnl-card';
 import type { ChainSettings } from '../shared/settings/defaults';
-import { NESTY_SITE_ORIGINS, isNestySite } from '../shared/nesty-site';
+import { isNestySite } from '../shared/nesty-site';
 import { ALERT_CHECK_MINUTES, alertPage } from '../shared/alerts';
 import { isSolana } from '../shared/solana';
 import { isBuiltinOrigin, siteScriptId } from '../shared/sites';
@@ -364,18 +364,14 @@ export default defineBackground({
       newId: () => crypto.randomUUID(),
       now: Date.now,
     });
-    // Only the Nesty website sets alerts. A build that trusts no site (a store build, until
-    // the site is hosted) has none, and no notifications permission: the API is not there.
-    if (NESTY_SITE_ORIGINS.length) {
-      void alerts.start().catch(() => undefined);
-      // A click on an alert opens its coin on the site that set it.
-      browser.notifications.onClicked.addListener((id) => {
-        const url = alertPage(id);
-        if (!url) return;
-        void browser.tabs.create({ url });
-        void browser.notifications.clear(id);
-      });
-    }
+    void alerts.start().catch(() => undefined);
+    // A click on an alert opens its coin on the site that set it.
+    browser.notifications.onClicked.addListener((id) => {
+      const url = alertPage(id);
+      if (!url) return;
+      void browser.tabs.create({ url });
+      void browser.notifications.clear(id);
+    });
 
     // Runtime-enabled sites (on top of the built-in list).
     let enabled = new Set<string>();

@@ -1,6 +1,6 @@
 import { defineConfig } from 'wxt';
 // Read here in Node, where import.meta.env is the process environment (WXT_STORE).
-import { NESTY_SITE_ORIGINS, STORE_BUILD } from './src/shared/nesty-site';
+import { STORE_BUILD } from './src/shared/nesty-site';
 import { API_HOSTS, BUILTIN_SITES } from './src/shared/sites';
 
 /**
@@ -29,8 +29,7 @@ export default defineConfig({
     // storage: vault + settings; alarms: auto-lock timer;
     // offscreen + clipboardWrite: blank the clipboard 30 s after a key export;
     // scripting + activeTab: inject the panel on sites the user enables at runtime;
-    // notifications: the price alerts set on the Nesty website, so only a build that
-    // trusts the site asks for it (the store's does not, until the site is hosted).
+    // notifications: the price alerts set on the Nesty website.
     permissions: [
       'storage',
       'alarms',
@@ -38,7 +37,7 @@ export default defineConfig({
       'clipboardWrite',
       'scripting',
       'activeTab',
-      ...(NESTY_SITE_ORIGINS.length ? ['notifications'] : []),
+      'notifications',
     ],
     // Only the built-in terminals (and the pool-index API) are granted at install time.
     // Any other site is granted per-origin at runtime from the popup.
@@ -55,20 +54,6 @@ export default defineConfig({
     content_security_policy: {
       // 'wasm-unsafe-eval' is required by hash-wasm (Argon2id). No remote code.
       extension_pages: "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'",
-    },
-  },
-  hooks: {
-    // A content script that matches no page is not built. In the store build that is the
-    // Nesty website's, until the site has an origin of its own: the local development
-    // server is trusted by the other builds only.
-    'entrypoints:resolved': (_wxt, entrypoints) => {
-      for (const e of entrypoints)
-        if (
-          e.type === 'content-script' &&
-          e.options.registration !== 'runtime' &&
-          !e.options.matches?.length
-        )
-          e.skipped = true;
     },
   },
   // JSX → Preact comes from tsconfig (jsx: react-jsx, jsxImportSource: preact).
