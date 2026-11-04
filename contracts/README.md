@@ -144,21 +144,25 @@ extension**):
 | BNB Smart Chain | `0x60cf5314e46ae66ee20d2c9ce21bdc7c7c3a1e164d92cf7faf18342a14869312` |
 | Robinhood Chain | `0xcf79007c8a05bea3268bc866c02c1e2101c39ea1f6e1a9d5aaa582f8d9551b2d` |
 
-To verify the source on the explorers, so anyone can read the code they trade through
-(one Etherscan key, `ETHERSCAN_API_KEY`, covers Ethereum, Base and BSC; Blockscout takes
-none):
+The source is verified (2026-11-05) as `src/NestyRouter.sol:NestyRouter` on Etherscan,
+Basescan, BscScan and RobinScan, and on Sourcify for all four chains, so anyone can read
+the code they trade through. How it was done (one Etherscan key, `ETHERSCAN_API_KEY`,
+covers Ethereum, Base and BSC; forge also submits each to Sourcify):
 
 ```sh
 cd contracts
 ARGS=$(cast abi-encode "constructor(address)" 0x000000000022D473030F116dDEE9F6B43aC78BA3)
 for CHAIN in 1 8453 56; do
   forge verify-contract 0xfdf24705a48f08558a6eed9B72d24cF3Bbce07e5 src/NestyRouter.sol:NestyRouter \
-    --chain $CHAIN --constructor-args $ARGS --watch
+    --chain $CHAIN --constructor-args $ARGS --verifier etherscan --watch
 done
 forge verify-contract 0xfdf24705a48f08558a6eed9B72d24cF3Bbce07e5 src/NestyRouter.sol:NestyRouter \
-  --chain 4663 --constructor-args $ARGS --verifier blockscout \
-  --verifier-url https://robinhoodchain.blockscout.com/api/ --watch
+  --chain 4663 --constructor-args $ARGS --verifier sourcify --watch
 ```
+
+On Robinhood Chain, Etherscan's API is for paid plans only and Blockscout's sits behind a
+bot check that scripts cannot pass; the router went through Sourcify, and RobinScan showed
+the source verified right after.
 
 ## Develop
 
