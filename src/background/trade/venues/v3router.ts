@@ -8,6 +8,7 @@ import {
   type Hex,
 } from 'viem';
 import type { BlockedAction } from '../../../shared/panel';
+import { sharedMulticall } from '../../chain/client';
 import { hopStables, stableSymbol } from '../stables';
 import type { BuyParams, PoolRef, SellParams, Side, TxDraft, Venue, VenueCtx } from '../types';
 import { decodeV3Path, encodeV3Path, type V3Hop } from '../uniswap/codec';
@@ -144,9 +145,11 @@ export function v3RouterVenue(cfg: V3RouterConfig): { venue: Venue; rule: ExtraC
   const quote = async (ctx: VenueCtx, ref: PoolRef, side: Side, amounts: readonly bigint[]) => {
     const path = hops(ctx, ref, side);
     const single = path.length === 1 ? path[0] : undefined;
-    const res = await ctx.client.multicall({
-      allowFailure: true,
-      contracts: amounts.map((amountIn) =>
+    // The factory's own pools run only the DEX's code and the tokens': their quotes go out
+    // with the other pools' in one request.
+    const res = await sharedMulticall(
+      ctx.client,
+      amounts.map((amountIn) =>
         single
           ? ({
               address: cfg.quoter,
@@ -169,7 +172,7 @@ export function v3RouterVenue(cfg: V3RouterConfig): { venue: Venue; rule: ExtraC
               args: [encodeV3Path(path), amountIn],
             } as const),
       ),
-    });
+    );
     return res.map((r) =>
       r.status === 'success' ? ((r.result as readonly unknown[])[0] as bigint) : null,
     );

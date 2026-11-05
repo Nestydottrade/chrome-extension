@@ -10,6 +10,20 @@ export interface Routed {
 const POOL_TTL_MS = 60_000;
 /** How much more a fallback route must pay out to replace one of Nesty's own. */
 const FALLBACK_EDGE_BPS = 50;
+/** How long a refresh quotes only the pools that won the last full round. */
+const FULL_ROUND_MS = 15_000;
+/** Full rounds remembered at most (one per chain, token, side and amounts). */
+const ROUNDS_KEPT = 256;
+
+/** A pool's key across venues: two venues may list the same pool. */
+const poolKey = (p: PoolRef): string => `${p.venueId}:${p.id}`;
+
+/** A refresh's last full round: when, the pools that won an amount, and the amounts routed. */
+interface FullRound {
+  at: number;
+  won: Set<string>;
+  routed: boolean[];
+}
 
 /** Discovers pools across venues (cached) and picks the best pool per amount. */
 /**
@@ -29,6 +43,8 @@ export class Routing {
   private readonly recent = new Map<string, { at: number; route: Routed }>();
   /** Tokens whose fallback (aggregator) routes delivered less than quoted: until when. */
   private readonly distrusted = new Map<string, number>();
+  /** Each refresh's last full round, by chain, token, side and amounts. */
+  private readonly rounds = new Map<string, FullRound>();
 
   /**
    * `fallback` venues (aggregators) are quoted alongside and used when no regular pool can
@@ -122,6 +138,11 @@ export class Routing {
   /**
    * Like best(), but also quotes a tiny reference amount on every pool in the same
    * round trip, so price impact can be computed against the chosen pool.
+   *
+   * `refresh`: the same amounts asked again, as the panel does every few seconds. Every pool
+   * costs a quote per amount, and a token can have twenty pools. So for FULL_ROUND_MS after
+   * a full round, only the pools that won it are quoted. A full round runs again once it is
+   * due, when none of those pools is still listed, or when one lost a route it had.
    */
   async bestWithRef(
     ctx: VenueCtx,
@@ -129,11 +150,11 @@ export class Routing {
     side: Side,
     ref: bigint | null,
     amounts: readonly bigint[],
-    opts: { own?: boolean } = {},
+    opts: { own?: boolean; refresh?: boolean } = {},
   ): Promise<{ route: Routed | null; refOut: bigint | null }[]> {
     const empty = amounts.map(() => ({ route: null, refOut: null }));
     if (amounts.length === 0) return empty;
-    const chosen = await this.choose(ctx, token, side, ref, amounts, !!opts.own);
+    const chosen = await this.choose(ctx, token, side, ref, amounts, !!opts.own, !!opts.refresh);
     // Own-only answers are side lookups (tax, checks), not what the panel offers.
     if (opts.own) return chosen;
     const at = ctx.now();
@@ -154,8 +175,12 @@ export class Routing {
     ref: bigint | null,
     amounts: readonly bigint[],
     ownOnly: boolean,
+    refresh: boolean,
   ): Promise<{ route: Routed | null; refOut: bigint | null }[]> {
-    const found = await this.pick(ctx, token, side, ref, amounts, await this.discover(ctx, token));
+    const pools = await this.discover(ctx, token);
+    const found = refresh
+      ? await this.pickAgain(ctx, token, side, ref, amounts, pools)
+      : await this.pick(ctx, token, side, ref, amounts, pools);
     if (this.fallback.length === 0 || ownOnly) return found;
     const distrusted = this.isDistrusted(ctx, token);
     // Distrusted: only where none of Nesty's own pools can quote, skip the API call otherwise.
@@ -213,6 +238,38 @@ export class Routing {
       });
       return { route, refOut };
     });
+  }
+
+  /** pick() for a refresh: the last full round's winners alone, while that round holds. */
+  private async pickAgain(
+    ctx: VenueCtx,
+    token: Address,
+    side: Side,
+    ref: bigint | null,
+    amounts: readonly bigint[],
+    pools: PoolRef[],
+  ): Promise<{ route: Routed | null; refOut: bigint | null }[]> {
+    const key = `${ctx.chain.id}:${token.toLowerCase()}:${side}:${ref ?? ''}:${amounts.join(',')}`;
+    const last = this.rounds.get(key);
+    if (last && ctx.now() - last.at < FULL_ROUND_MS) {
+      const winners = pools.filter((p) => last.won.has(poolKey(p)));
+      if (winners.length > 0) {
+        const again = await this.pick(ctx, token, side, ref, amounts, winners);
+        if (again.every((r, i) => r.route !== null || !last.routed[i])) return again;
+      }
+    }
+    const full = await this.pick(ctx, token, side, ref, amounts, pools);
+    this.rounds.delete(key);
+    if (this.rounds.size >= ROUNDS_KEPT) {
+      const oldest = this.rounds.keys().next().value;
+      if (oldest !== undefined) this.rounds.delete(oldest);
+    }
+    this.rounds.set(key, {
+      at: ctx.now(),
+      won: new Set(full.flatMap((r) => (r.route ? [poolKey(r.route.pool)] : []))),
+      routed: full.map((r) => r.route !== null),
+    });
+    return full;
   }
 
   /** Quote a specific pool again (used right before sending). */

@@ -10,6 +10,7 @@ import {
   type Address,
   type Hex,
 } from 'viem';
+import { sharedMulticall, type SharedResult } from '../../chain/client';
 import type { BuyParams, PoolRef, SellParams, Side, TxDraft, Venue, VenueCtx } from '../types';
 import { hopStables, stableSymbol } from '../stables';
 import { PERMIT2, UNISWAP, type UniswapDeployment } from './addresses';
@@ -563,11 +564,13 @@ async function quoteLeg(
     );
   }
 
+  // A v3 pool or a hook-less v4 pool runs only Uniswap's code and the tokens': its quotes go
+  // out with the other pools' in one request.
   if (pool.kind === 'v3') {
     const [tokenIn, tokenOut] = side === 'buy' ? [pool.quote, token] : [token, pool.quote];
-    const res = await ctx.client.multicall({
-      allowFailure: true,
-      contracts: amounts.map(
+    const res = await sharedMulticall(
+      ctx.client,
+      amounts.map(
         (amountIn) =>
           ({
             address: d.v3QuoterV2,
@@ -576,30 +579,34 @@ async function quoteLeg(
             args: [{ tokenIn, tokenOut, amountIn, fee: pool.fee, sqrtPriceLimitX96: 0n }],
           }) as const,
       ),
-    });
-    return res.map((r) =>
-      r.status === 'success' ? ((r.result as readonly bigint[])[0] ?? null) : null,
     );
+    return res.map(firstOut);
   }
 
   const tokenIs0 = isAddressEqual(pool.key.currency0, token);
   // buy: quote → token. zeroForOne means currency0 → currency1.
   const zeroForOne = side === 'buy' ? !tokenIs0 : tokenIs0;
-  const res = await ctx.client.multicall({
-    allowFailure: true,
-    contracts: amounts.map(
-      (exactAmount) =>
-        ({
-          address: d.v4Quoter,
-          abi: v4QuoterAbi,
-          functionName: 'quoteExactInputSingle',
-          args: [{ poolKey: pool.key, zeroForOne, exactAmount, hookData: '0x' }],
-        }) as const,
-    ),
-  });
-  return res.map((r) =>
-    r.status === 'success' ? ((r.result as readonly bigint[])[0] ?? null) : null,
+  const contracts = amounts.map(
+    (exactAmount) =>
+      ({
+        address: d.v4Quoter,
+        abi: v4QuoterAbi,
+        functionName: 'quoteExactInputSingle',
+        args: [{ poolKey: pool.key, zeroForOne, exactAmount, hookData: '0x' }],
+      }) as const,
   );
+  // A hook is anyone's code, and anyone can open a hooked pool for a token: such a pool asks
+  // alone, so a hook that burns its gas cannot starve the other pools' quotes.
+  const res: SharedResult[] =
+    pool.key.hooks === zeroAddress
+      ? await sharedMulticall(ctx.client, contracts)
+      : await ctx.client.multicall({ allowFailure: true, contracts });
+  return res.map(firstOut);
+}
+
+/** A quoter's amount out: the first value it returns, or null where the call failed. */
+function firstOut(r: SharedResult): bigint | null {
+  return r.status === 'success' ? ((r.result as readonly bigint[])[0] ?? null) : null;
 }
 
 /** Runs `second` on the outputs of `first`, keeping each amount's position. */

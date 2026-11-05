@@ -150,11 +150,12 @@ export async function panelQuotes(
     ? sellIn.reduce((m, a) => (a > 0n && (m === 0n || a < m) ? a : m), 0n) / 100n || 1n
     : 0n;
 
-  // One round trip per pool: the reference amount is quoted together with the real ones.
+  // The reference amount is quoted together with the real ones. The panel asks again every
+  // few seconds, so between full rounds only the pools that won are quoted (`refresh`).
   const [buyRoutes, sellRoutes] = await Promise.all([
-    d.routing.bestWithRef(ctx, req.token, 'buy', buyRef, buyIn),
+    d.routing.bestWithRef(ctx, req.token, 'buy', buyRef, buyIn, { refresh: true }),
     sellIn.length
-      ? d.routing.bestWithRef(ctx, req.token, 'sell', sellRef, sellIn)
+      ? d.routing.bestWithRef(ctx, req.token, 'sell', sellRef, sellIn, { refresh: true })
       : Promise.resolve([]),
   ]);
   const nativeUsd = d.prices.peek(ctx);
