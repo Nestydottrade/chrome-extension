@@ -19,7 +19,7 @@ else await build(config);
 
 const out = path.resolve('.output', 'chrome-mv3-store');
 const manifest = JSON.parse(await readFile(path.join(out, 'manifest.json'), 'utf8'));
-// Price alerts, and so notifications, come from the Nesty website only.
+// Price alerts and followed wallets, and so notifications, come from the Nesty website only.
 const site = manifest.content_scripts?.some((s) => s.js?.some((f) => f.includes('nesty-site')));
 const problems =
   !site && manifest.permissions.includes('notifications')

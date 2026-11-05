@@ -6,13 +6,9 @@ import {
   TRADES_KEPT,
   TRADES_PER_WALLET,
   TRADE_TTL_MS,
-  coinsFromFeed,
   shortAddress,
-  trackNoteId,
-  tradeText,
   walletName,
   walletOf,
-  type FeedCoin,
   type FollowEdit,
   type FollowInput,
   type FollowedWallet,
@@ -20,11 +16,14 @@ import {
   type TrackerView,
 } from '../shared/tracker';
 import { WSOL_MINT } from './solana/address';
+import { trackNoteId, tradeText } from './tracker-notes';
 import {
+  coinsFromFeed,
   evmMoves,
   evmTrade,
   solTrade,
   type EvmLog,
+  type FeedCoin,
   type ParsedTrade,
   type SolTxJson,
 } from './tracker-parse';
@@ -548,8 +547,8 @@ export class TrackerWatcher {
    * sent more is looked into: the block of each new one is found by its sent count.
    *
    * Private RPC: the search reads balances and sent counts at past blocks. BNB Chain's own
-   * nodes keep only about 128 blocks of state and Arbitrum's publicnode refuses any past
-   * block; the next public RPC answers today (docs/private-rpc.md).
+   * nodes keep only about 128 blocks of state; the next public RPC answers today
+   * (docs/private-rpc.md).
    */
   private async readEvm(
     chainId: number,

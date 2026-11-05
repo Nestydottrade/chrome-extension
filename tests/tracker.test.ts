@@ -6,8 +6,10 @@ import {
   type SolReader,
   type TrackerDeps,
 } from '../src/background/tracker';
+import { trackNote, tradeText } from '../src/background/tracker-notes';
 import {
   TRANSFER_TOPIC,
+  coinsFromFeed,
   evmMoves,
   evmTrade,
   solTrade,
@@ -16,13 +18,7 @@ import {
 } from '../src/background/tracker-parse';
 import { WSOL_MINT, USDC_MINT } from '../src/background/solana/address';
 import { getChain } from '../src/shared/chains';
-import {
-  MAX_FOLLOWED,
-  coinsFromFeed,
-  trackNote,
-  tradeText,
-  type TrackedTrade,
-} from '../src/shared/tracker';
+import { MAX_FOLLOWED, type TrackedTrade } from '../src/shared/tracker';
 import { SOLANA_CHAIN_ID } from '../src/shared/solana';
 
 const SITE = 'http://localhost:5173';

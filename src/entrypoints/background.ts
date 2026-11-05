@@ -3,6 +3,7 @@ import { browser } from 'wxt/browser';
 import { ExitWatcher } from '../background/exits';
 import { AlertWatcher } from '../background/alerts';
 import { TrackerWatcher } from '../background/tracker';
+import { trackNote } from '../background/tracker-notes';
 import { evmReader, solReader } from '../background/tracker-reads';
 import { defineBackground } from 'wxt/utils/define-background';
 import { ClientPool, toViemChain } from '../background/chain/client';
@@ -39,7 +40,7 @@ import type { ChainSettings } from '../shared/settings/defaults';
 import { isNestySite } from '../shared/nesty-site';
 import { ALERT_CHECK_MINUTES, alertPage } from '../shared/alerts';
 import { isSolana } from '../shared/solana';
-import { TRACK_CHECK_MINUTES, trackNote } from '../shared/tracker';
+import { TRACK_CHECK_MINUTES } from '../shared/tracker';
 import { isBuiltinOrigin, siteScriptId } from '../shared/sites';
 
 const AUTOLOCK_ALARM = 'nesty.autolock';
