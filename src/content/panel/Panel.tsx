@@ -39,6 +39,7 @@ import {
   ExpandIcon,
   MinusIcon,
   RouteIcon,
+  ShareIcon,
 } from './icons';
 import {
   PenIcon,
@@ -949,9 +950,15 @@ export function Panel({ detection }: { detection: Detection | null }) {
                       {pnl.usd >= 0 ? '+' : '−'}
                       {formatUsd(Math.abs(pnl.usd))}
                     </span>
-                    <span class="pnl-pct">
-                      <ArrowIcon up={pnl.bps >= 0} />
-                      {formatPercent(Math.abs(pnl.bps))}
+                    <span class="pnl-sub">
+                      <span class="pnl-pct">
+                        <ArrowIcon up={pnl.bps >= 0} />
+                        {formatPercent(Math.abs(pnl.bps))}
+                      </span>
+                      <span class="share-tag">
+                        <ShareIcon />
+                        Share
+                      </span>
                     </span>
                   </button>
                 )}

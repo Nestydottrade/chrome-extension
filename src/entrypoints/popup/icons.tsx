@@ -108,6 +108,14 @@ export const IconClose = (p: P) => (
   </Svg>
 );
 
+export const IconShare = (p: P) => (
+  <Svg {...p}>
+    <path d="M12 15V3" />
+    <path d="m7 8 5-5 5 5" />
+    <path d="M5 12v8h14v-8" />
+  </Svg>
+);
+
 export const IconSend = (p: P) => (
   <Svg {...p}>
     <path d="M7 17 17 7" />

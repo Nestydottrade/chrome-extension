@@ -19,7 +19,7 @@ import { nativeSym, statusOf, title, useHistory } from './Activity';
 import { Row, Rows, when } from './ActivityDetail';
 import { heldBy, pnlOf, signedUsd, valueOf } from './holdings';
 import { ExitPlan } from '../../ui/ExitPlan';
-import { IconBack, IconCopy, IconExternal, IconSend } from './icons';
+import { IconBack, IconCopy, IconExternal, IconSend, IconShare } from './icons';
 import { chartUrl } from './links';
 import { TokenAvatar } from './TokenAvatar';
 
@@ -274,6 +274,10 @@ export function TokenDetail({
           >
             {signedUsd(pnl.usd)} ({pnl.bps >= 0 ? '+' : '−'}
             {formatPercent(Math.abs(pnl.bps))}) open PnL
+            <span class="share-tag">
+              <IconShare size={11} />
+              Share
+            </span>
           </button>
         )}
       </section>

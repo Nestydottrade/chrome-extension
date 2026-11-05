@@ -144,6 +144,10 @@ export const PANEL_CSS = `
 .pnl:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
 .pnl-usd { font: 600 20px/1 var(--num); }
 .pnl-pct { display: inline-flex; align-items: center; gap: 3px; font-size: 12px; font-weight: 600; }
+.pnl-sub { display: inline-flex; align-items: center; gap: 6px; }
+/* Share, so the PnL card is found. */
+.share-tag { display: inline-flex; align-items: center; gap: 3px; height: 18px; padding: 0 6px; border: 1px solid var(--border-strong); border-radius: 5px; color: var(--light); font: 600 11px/1 var(--num); transition: border-color .12s ease, color .12s ease; }
+.pnl:hover .share-tag, .pnl:focus-visible .share-tag { border-color: var(--light); color: var(--text); }
 .pnl.up { color: var(--buy); }
 .pnl.down { color: var(--sell); }
 .pos-foot { display: flex; justify-content: space-between; gap: 8px; color: var(--muted); font-size: 12px; }

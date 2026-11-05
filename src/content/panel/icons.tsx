@@ -65,6 +65,12 @@ export const BoltIcon = () => (
   </svg>
 );
 
+export const ShareIcon = () => (
+  <Svg size={11}>
+    <path d="M12 15V3M7 8l5-5 5 5M5 12v8h14v-8" />
+  </Svg>
+);
+
 export const ArrowIcon = ({ up }: { up: boolean }) => (
   <Svg size={10}>
     {up ? <path d="M12 19V5M5 12l7-7 7 7" /> : <path d="M12 5v14M5 12l7 7 7-7" />}
