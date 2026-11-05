@@ -37,7 +37,7 @@ import type { PushEvent } from '../shared/messages';
 import type { TradeTicket } from '../shared/panel';
 import { SHARE_KEY, type PnlCard } from '../shared/pnl-card';
 import type { ChainSettings } from '../shared/settings/defaults';
-import { isNestySite } from '../shared/nesty-site';
+import { HOSTED_SITE_ORIGINS, isNestySite } from '../shared/nesty-site';
 import { ALERT_CHECK_MINUTES, alertPage } from '../shared/alerts';
 import { isSolana } from '../shared/solana';
 import { TRACK_CHECK_MINUTES } from '../shared/tracker';
@@ -528,6 +528,8 @@ export default defineBackground({
       }),
       settings,
       local,
+      // nesty.trade is Nesty's own: connected from the start, until the user disconnects it.
+      connectedByDefault: HOSTED_SITE_ORIGINS,
       openApproval: async (id) =>
         (
           await browser.windows.create({

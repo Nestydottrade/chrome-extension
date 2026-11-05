@@ -45,16 +45,17 @@ import { VaultError, type KeyValueStore, type Vault } from './vault/vault';
 /**
  * The Nesty website's side of the extension. There the extension keeps the keys and
  * nothing else: the site finds coins, quotes, builds and sends its transactions itself.
- * The user lets the site in once (an approval window); after that it may list the
- * wallets and ask for signatures on trades, Solana and EVM (with the approvals and
- * Permit2 messages EVM sells need), and on new coins. Each is checked again here as the
- * panel's trades are (built again from chain, the user's limits, the validator); buys
- * above the confirmation amount, or past a minute's budget, wait for the user, and every
- * new coin does. It may also ask for a bridge, which the extension quotes and sends
- * itself: to the user's own wallet like a buy, and to an outside address only once the
- * user approves it here (with the password above the confirmation amount, as a Send).
- * And it may keep price alerts and followed wallets here, which the extension checks and
- * notifies of; they go when the site is disconnected.
+ * The hosted site is in from the start; any other (the development server) gets in once
+ * the user approves it in a window, as does the hosted site after the user disconnects it.
+ * Once in, it may list the wallets and ask for signatures on trades, Solana and EVM (with
+ * the approvals and Permit2 messages EVM sells need), and on new coins. Each is checked
+ * again here as the panel's trades are (built again from chain, the user's limits, the
+ * validator); buys above the confirmation amount, or past a minute's budget, wait for the
+ * user, and every new coin does. It may also ask for a bridge, which the extension quotes
+ * and sends itself: to the user's own wallet like a buy, and to an outside address only
+ * once the user approves it here (with the password above the confirmation amount, as a
+ * Send). And it may keep price alerts and followed wallets here, which the extension
+ * checks and notifies of; they go when the site is disconnected.
  * Nothing else is ever signed for it: no transfers, no messages, and no key leaves.
  */
 export interface SiteDeps {
@@ -92,6 +93,11 @@ export interface SiteDeps {
   >;
   settings: Pick<SettingsStore, 'get'>;
   local: KeyValueStore;
+  /**
+   * In from the start, with no approval: the hosted site, which every build trusts by name.
+   * Once the user disconnects it, it waits for an approval like any other.
+   */
+  connectedByDefault: readonly string[];
   /** Opens the approval window for a pending request: its window id. */
   openApproval: (id: string) => Promise<number | undefined>;
   /** Opens the extension's popup in a window, to unlock. */
@@ -109,6 +115,8 @@ export class SiteError extends Error {
 }
 
 const CONNECTIONS_KEY = 'site.connections';
+/** Of the sites in from the start, those the user disconnected. */
+const DISCONNECTED_KEY = 'site.disconnected';
 /** A request nobody answers is turned down after this long. */
 const APPROVAL_TIMEOUT_MS = 120_000;
 /** Bridges a site started that it can still follow. */
@@ -118,6 +126,7 @@ const BUDGET_WINDOW_MS = 60_000;
 
 interface Connection {
   origin: string;
+  /** When the user approved it: 0 for a site in from the start. */
   at: number;
 }
 
@@ -149,7 +158,7 @@ export class SiteService {
     return { version: this.d.version, exists, unlocked, connected, limits: limitsOf(gs) };
   }
 
-  /** Lets the site in (the user approves it once), then lists the wallets. */
+  /** Lets the site in, by the user's approval unless it is in already, then lists the wallets. */
   async connect(origin: string): Promise<SiteWallet[]> {
     if (!(await this.d.vault.exists())) throw new VaultError('no_vault');
     if (!(await this.d.vault.isUnlocked())) throw new VaultError('locked');
@@ -162,6 +171,12 @@ export class SiteService {
       if (!(await asked)) throw new SiteError('rejected');
       const list = (await this.connectionList()).filter((c) => c.origin !== origin);
       await this.d.local.set(CONNECTIONS_KEY, [...list, { origin, at: this.d.now() }]);
+      const off = await this.disconnectedList();
+      if (off.includes(origin))
+        await this.d.local.set(
+          DISCONNECTED_KEY,
+          off.filter((o) => o !== origin),
+        );
     }
     return this.walletList();
   }
@@ -172,6 +187,9 @@ export class SiteService {
       CONNECTIONS_KEY,
       list.filter((c) => c.origin !== origin),
     );
+    const off = await this.disconnectedList();
+    if (this.d.connectedByDefault.includes(origin) && !off.includes(origin))
+      await this.d.local.set(DISCONNECTED_KEY, [...off, origin]);
     this.spent.delete(origin);
     await this.d.alerts.removeSite(origin);
     await this.d.tracker.removeSite(origin);
@@ -242,8 +260,13 @@ export class SiteService {
     this.unlockWindow = await this.d.openUnlock();
   }
 
-  connections(): Promise<Connection[]> {
-    return this.connectionList();
+  /** The sites in now: those in from the start and not disconnected, then those approved. */
+  async connections(): Promise<Connection[]> {
+    const [list, off] = await Promise.all([this.connectionList(), this.disconnectedList()]);
+    const fromStart = this.d.connectedByDefault
+      .filter((origin) => !off.includes(origin) && !list.some((c) => c.origin === origin))
+      .map((origin) => ({ origin, at: 0 }));
+    return [...fromStart, ...list];
   }
 
   /**
@@ -515,7 +538,7 @@ export class SiteService {
   }
 
   private async isConnected(origin: string): Promise<boolean> {
-    return (await this.connectionList()).some((c) => c.origin === origin);
+    return (await this.connections()).some((c) => c.origin === origin);
   }
 
   private async requireConnected(origin: string): Promise<void> {
@@ -533,6 +556,11 @@ export class SiteService {
             typeof (c as Connection).at === 'number',
         )
       : [];
+  }
+
+  private async disconnectedList(): Promise<string[]> {
+    const raw = await this.d.local.get(DISCONNECTED_KEY);
+    return Array.isArray(raw) ? raw.filter((o): o is string => typeof o === 'string') : [];
   }
 
   private async walletList(): Promise<SiteWallet[]> {

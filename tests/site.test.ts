@@ -45,6 +45,7 @@ const SEED = new Uint8Array(32).fill(7);
 const WALLET = publicKeyOf(SEED);
 const SITE = 'http://localhost:5173';
 const OTHER = 'http://127.0.0.1:5173';
+const HOSTED = 'https://nesty.trade';
 const BLOCKHASH = base58.encode(new Uint8Array(32).fill(1));
 const LIMIT = Uint8Array.from([2, 0x40, 0x0d, 0x03, 0x00]);
 const EVM_KEY = `0x${'22'.repeat(32)}` as const;
@@ -57,6 +58,8 @@ const STRANGER = publicKeyOf(new Uint8Array(32).fill(9));
 function setup(
   check: SiteTradeCheck = { ok: true, summary: 'Buy', usd: 5 },
   evmCheck: SiteEvmCheck = { ok: true, summary: 'Buy', usd: 5 },
+  /** Sites in from the start, and the storage (shared, it outlasts a restart). */
+  start: { connectedByDefault?: readonly string[]; local?: MemoryStore } = {},
 ) {
   const state = {
     unlocked: true,
@@ -129,7 +132,8 @@ function setup(
       now: () => state.now,
     }),
     settings: new SettingsStore(new MemoryStore()),
-    local: new MemoryStore(),
+    local: start.local ?? new MemoryStore(),
+    connectedByDefault: start.connectedByDefault ?? [],
     openApproval: async (id) => {
       state.opened++;
       state.views.push(site.pendingView(id));
@@ -255,6 +259,35 @@ describe('the Nesty website', () => {
     site.windowClosed(41);
     await expect(asking).rejects.toEqual(new SiteError('rejected'));
     expect((await site.hello(SITE)).connected).toBe(false);
+  });
+
+  it('has the hosted site in from the start, until the user disconnects it', async () => {
+    const start = { connectedByDefault: [HOSTED], local: new MemoryStore() };
+    const { site, state } = setup(undefined, undefined, start);
+    expect((await site.hello(HOSTED)).connected).toBe(true);
+    expect(await site.wallets(HOSTED)).toHaveLength(2);
+    await site.connect(HOSTED);
+    expect(state.opened).toBe(0);
+    expect(await site.connections()).toEqual([{ origin: HOSTED, at: 0 }]);
+    // The development server still waits for the user's approval.
+    expect((await site.hello(SITE)).connected).toBe(false);
+
+    await site.disconnect(HOSTED);
+    expect((await site.hello(HOSTED)).connected).toBe(false);
+    await expect(site.wallets(HOSTED)).rejects.toEqual(new SiteError('not_connected'));
+    expect(await site.connections()).toEqual([]);
+
+    // It stays out after a restart, and gets back in only by the user's approval.
+    const again = setup(undefined, undefined, start);
+    expect((await again.site.hello(HOSTED)).connected).toBe(false);
+    again.state.answer = false;
+    await expect(again.site.connect(HOSTED)).rejects.toEqual(new SiteError('rejected'));
+    again.state.answer = true;
+    await again.site.connect(HOSTED);
+    expect(again.state.opened).toBe(2);
+    expect(await again.site.connections()).toEqual([{ origin: HOSTED, at: again.state.now }]);
+    await again.site.disconnect(HOSTED);
+    expect((await again.site.hello(HOSTED)).connected).toBe(false);
   });
 
   it('cannot connect or sign while the vault is locked', async () => {

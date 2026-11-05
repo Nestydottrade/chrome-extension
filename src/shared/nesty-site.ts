@@ -3,10 +3,16 @@
  * trades the site builds, each checked again here first (route, limits, validator).
  */
 
-/** The hosted site, trusted by every build. www.nesty.trade only redirects here. */
-const SITE_ORIGINS = ['https://nesty.trade'];
+/**
+ * The hosted site, trusted by every build, and connected from the start until the user
+ * disconnects it. www.nesty.trade only redirects here.
+ */
+export const HOSTED_SITE_ORIGINS: readonly string[] = ['https://nesty.trade'];
 
-/** The local development server: trusted by every build except the store's. */
+/**
+ * The local development server: trusted by every build except the store's, and connected
+ * only once the user approves it.
+ */
 const LOCAL_ORIGINS = ['http://localhost:5173', 'http://127.0.0.1:5173'];
 
 /**
@@ -16,8 +22,8 @@ const LOCAL_ORIGINS = ['http://localhost:5173', 'http://127.0.0.1:5173'];
 export const STORE_BUILD = import.meta.env.WXT_STORE === 'true';
 
 export const NESTY_SITE_ORIGINS: readonly string[] = STORE_BUILD
-  ? SITE_ORIGINS
-  : [...SITE_ORIGINS, ...LOCAL_ORIGINS];
+  ? HOSTED_SITE_ORIGINS
+  : [...HOSTED_SITE_ORIGINS, ...LOCAL_ORIGINS];
 
 /** Content-script matches for the Nesty website (match patterns take no port). */
 export const NESTY_SITE_MATCHES: string[] = [

@@ -44,8 +44,9 @@ directly from your browser. Each sees your IP address and what it is asked for:
   load. You can turn logos off in Settings.
 - **Trading sites** where the panel runs: Nesty reads the page's address to find its token,
   and sends the site nothing.
-- **The Nesty website** (nesty.trade), once you connect the extension to it, sees your
-  wallets' names and public addresses, the trades, new coins, bridges and price alerts you
+- **The Nesty website** (nesty.trade), while the extension is connected to it (from the
+  start, until you disconnect it), sees your wallets' names and public addresses, the
+  trades, new coins, bridges and price alerts you
   make there, and the wallets you follow there with their trades. It never sees a key: the
   extension checks and signs each transaction itself. The site's own privacy policy is at
   https://nesty.trade/#/privacy.

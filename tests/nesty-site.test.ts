@@ -43,6 +43,7 @@ describe('the Nesty website', () => {
   it('is the hosted site only in the store build', async () => {
     const s = await site(true);
     expect(s.NESTY_SITE_ORIGINS).toEqual(['https://nesty.trade']);
+    expect(s.HOSTED_SITE_ORIGINS).toEqual(['https://nesty.trade']);
     expect(s.NESTY_SITE_MATCHES).toEqual(['https://nesty.trade/*']);
     expect(s.isNestySite('http://localhost:5173')).toBe(false);
     expect(s.isNestySite('http://127.0.0.1:5173')).toBe(false);

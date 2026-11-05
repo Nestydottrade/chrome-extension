@@ -140,8 +140,10 @@ one. On every other site the extension works as described above.
   content script on those origins carries window messages to the background and does
   nothing else.
 - What the site may ask for: whether Nesty is there (with the user's limits), a
-  connection (approved once per site in an extension window), the wallets' names and
-  public addresses, the unlock window, a signature on a trade or on a new coin
+  connection (`https://nesty.trade` has one from the start, until the user disconnects
+  it; the development server, or the site after a disconnect, gets one once the user
+  approves it in an extension window), the wallets' names and public addresses, the
+  unlock window, a signature on a trade or on a new coin
   (`site.sol.sign`, `site.evm.sign`, `site.evm.permit`), a bridge
   (`site.bridge.quote`, `site.bridge.send`, `site.bridge.status`), and price alerts
   (`site.alerts.list`, `site.alerts.set`, `site.alerts.remove`), which the extension
@@ -343,8 +345,9 @@ Tests: every legitimate plan from every venue passes; 19 named malicious payload
 
 **The Nesty website.** Unlike a terminal page, it can ask for trades without a click
 in Nesty's own UI, so a compromised copy of it could buy coins the user did not choose.
-What it can get is bounded: only from its exact origin, only after the user connects it,
-only trades between the wallet's own funds and a coin, or a new coin whose every fee and
+What it can get is bounded: only from its exact origin, only while it is connected (from
+the start, until the user disconnects it), only trades between the wallet's own funds and
+a coin, or a new coin whose every fee and
 reward goes to the wallet, or a bridge the extension builds itself, each rebuilt or
 re-checked from the chain by the extension, validated as above and held to the same
 limits. A buy above the confirmation amount, or past the per-click limit within a
