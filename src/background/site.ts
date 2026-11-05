@@ -16,6 +16,7 @@ import type {
   SiteHello,
   SitePendingView,
   SiteSolSigned,
+  SiteTracker,
   SiteWallet,
   SolCreateIntent,
   SolTradeIntent,
@@ -25,6 +26,7 @@ import { nativeDecimals } from '../shared/solana';
 import { hasEvm, type EvmAccount, type WalletAccount } from '../shared/wallet';
 import type { AlertWatcher } from './alerts';
 import type { SettingsStore } from './settings';
+import type { TrackerWatcher } from './tracker';
 import { publicKeyOf, signMessage } from './solana/keys';
 import type { SiteTradeCheck } from './solana/service';
 import { compileMessage, serializeTransaction, type Instruction } from './solana/tx';
@@ -51,8 +53,8 @@ import { VaultError, type KeyValueStore, type Vault } from './vault/vault';
  * new coin does. It may also ask for a bridge, which the extension quotes and sends
  * itself: to the user's own wallet like a buy, and to an outside address only once the
  * user approves it here (with the password above the confirmation amount, as a Send).
- * And it may keep price alerts here, which the extension checks and notifies of; they go
- * when the site is disconnected.
+ * And it may keep price alerts and followed wallets here, which the extension checks and
+ * notifies of; they go when the site is disconnected.
  * Nothing else is ever signed for it: no transfers, no messages, and no key leaves.
  */
 export interface SiteDeps {
@@ -83,6 +85,11 @@ export interface SiteDeps {
   evm: Pick<SiteEvmChecker, 'checkTx' | 'checkPermit' | 'noteSigned'>;
   /** The price alerts sites set (alerts.ts). */
   alerts: Pick<AlertWatcher, 'list' | 'add' | 'remove' | 'removeSite' | 'blocked'>;
+  /** The wallets sites follow (tracker.ts). */
+  tracker: Pick<
+    TrackerWatcher,
+    'feed' | 'follow' | 'unfollow' | 'edit' | 'setMinUsd' | 'removeSite'
+  >;
   settings: Pick<SettingsStore, 'get'>;
   local: KeyValueStore;
   /** Opens the approval window for a pending request: its window id. */
@@ -167,6 +174,7 @@ export class SiteService {
     );
     this.spent.delete(origin);
     await this.d.alerts.removeSite(origin);
+    await this.d.tracker.removeSite(origin);
   }
 
   async wallets(origin: string): Promise<SiteWallet[]> {
@@ -200,6 +208,32 @@ export class SiteService {
   async removeAlert(origin: string, id: string): Promise<void> {
     await this.requireConnected(origin);
     await this.d.alerts.remove(origin, id);
+  }
+
+  /** The wallets this site follows and their trades. Public data only: the vault may be locked. */
+  async trackerFeed(origin: string): Promise<SiteTracker> {
+    await this.requireConnected(origin);
+    return this.d.tracker.feed(origin);
+  }
+
+  async follow(origin: string, req: RequestOf<'site.tracker.follow'>): Promise<SiteTracker> {
+    await this.requireConnected(origin);
+    return this.d.tracker.follow(origin, { address: req.address, name: req.name });
+  }
+
+  async unfollow(origin: string, id: string): Promise<SiteTracker> {
+    await this.requireConnected(origin);
+    return this.d.tracker.unfollow(origin, id);
+  }
+
+  async editFollow(origin: string, req: RequestOf<'site.tracker.edit'>): Promise<SiteTracker> {
+    await this.requireConnected(origin);
+    return this.d.tracker.edit(origin, { id: req.id, name: req.name, alerts: req.alerts });
+  }
+
+  async trackerPrefs(origin: string, minUsd: number): Promise<SiteTracker> {
+    await this.requireConnected(origin);
+    return this.d.tracker.setMinUsd(origin, minUsd);
   }
 
   /** Opens the popup to unlock in (one window at a time). */

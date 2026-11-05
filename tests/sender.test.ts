@@ -120,7 +120,7 @@ describe('isAllowed', () => {
     );
   });
 
-  it('the Nesty website may connect, ask for trades to be signed, bridges and price alerts, and nothing else', () => {
+  it('the Nesty website may connect, ask for trades to be signed, bridges, price alerts and followed wallets, and nothing else', () => {
     const site = [...RequestSchema.options]
       .map((o) => o.shape.type.value as RequestType)
       .filter((type) => isAllowed('nesty-site', type));
@@ -137,6 +137,11 @@ describe('isAllowed', () => {
       'site.evm.sign',
       'site.hello',
       'site.sol.sign',
+      'site.tracker.edit',
+      'site.tracker.feed',
+      'site.tracker.follow',
+      'site.tracker.prefs',
+      'site.tracker.unfollow',
       'site.unlock',
       'site.wallets',
     ]);
@@ -150,6 +155,7 @@ describe('isAllowed', () => {
     expect(isAllowed('content-script', 'site.evm.permit')).toBe(false);
     expect(isAllowed('content-script', 'site.bridge.send')).toBe(false);
     expect(isAllowed('content-script', 'site.alerts.set')).toBe(false);
+    expect(isAllowed('content-script', 'site.tracker.follow')).toBe(false);
   });
 
   it('content scripts cannot unlock (password must not be typed into a page)', () => {

@@ -56,6 +56,7 @@ const MESSAGES: Record<ErrorCode, string> = {
   not_connected: 'Connect this site to Nesty first.',
   rejected: 'Declined in Nesty.',
   too_many_alerts: 'Nesty keeps up to 50 price alerts. Remove one to set another.',
+  too_many_wallets: 'Nesty follows up to 20 wallets. Unfollow one to add another.',
 };
 
 export function errorText(res: {

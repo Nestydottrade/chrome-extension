@@ -2,6 +2,8 @@ import { createPublicClient, http, type Address, type Hex, type PublicClient } f
 import { browser } from 'wxt/browser';
 import { ExitWatcher } from '../background/exits';
 import { AlertWatcher } from '../background/alerts';
+import { TrackerWatcher } from '../background/tracker';
+import { evmReader, solReader } from '../background/tracker-reads';
 import { defineBackground } from 'wxt/utils/define-background';
 import { ClientPool, toViemChain } from '../background/chain/client';
 import { handleMessage, type RouterDeps, type SiteControl } from '../background/router';
@@ -37,11 +39,13 @@ import type { ChainSettings } from '../shared/settings/defaults';
 import { isNestySite } from '../shared/nesty-site';
 import { ALERT_CHECK_MINUTES, alertPage } from '../shared/alerts';
 import { isSolana } from '../shared/solana';
+import { TRACK_CHECK_MINUTES, trackNote } from '../shared/tracker';
 import { isBuiltinOrigin, siteScriptId } from '../shared/sites';
 
 const AUTOLOCK_ALARM = 'nesty.autolock';
 const EXITS_ALARM = 'nesty.exits';
 const ALERTS_ALARM = 'nesty.alerts';
+const TRACKER_ALARM = 'nesty.tracker';
 const OFFSCREEN_PATH = '/offscreen.html';
 const CLIPBOARD_CLEAR_MS = 30_000;
 /** Minimum gap between connection keep-alive pings per chain. */
@@ -365,11 +369,55 @@ export default defineBackground({
       now: Date.now,
     });
     void alerts.start().catch(() => undefined);
-    // A click on an alert opens its coin on the site that set it.
+
+    // Wallets the website follows. While there are any, an alarm wakes the worker every 30
+    // seconds to read their trades; a new one shows a notification.
+    const tracker = new TrackerWatcher({
+      local,
+      fetchJson: (url) => fetchJson(url),
+      notify: async (id, title, message, buttons) => {
+        await browser.notifications.create(id, {
+          type: 'basic',
+          iconUrl: browser.runtime.getURL('/icon/128.png'),
+          title,
+          message,
+          priority: 1,
+          buttons: buttons.map((b) => ({ title: b })),
+        });
+      },
+      blocked: async () => (await browser.notifications.getPermissionLevel()) === 'denied',
+      schedule: async (on) => {
+        if (!on) {
+          await browser.alarms.clear(TRACKER_ALARM);
+          return;
+        }
+        if (!(await browser.alarms.get(TRACKER_ALARM)))
+          await browser.alarms.create(TRACKER_ALARM, { periodInMinutes: TRACK_CHECK_MINUTES });
+      },
+      sol: async () => solReader(await solana.rpc()),
+      evm: async (chainId) => {
+        const chain = getChain(chainId);
+        return chain ? evmReader(client(chain, await settings.getChain(chainId))) : null;
+      },
+      evmChains: () => [...CHAINS.keys()],
+      newId: () => crypto.randomUUID(),
+      now: Date.now,
+    });
+    void tracker.start().catch(() => undefined);
+
+    // A click on an alert, or on a followed wallet's trade, opens the coin on the site that
+    // set it; the trade's second button mutes that wallet.
     browser.notifications.onClicked.addListener((id) => {
-      const url = alertPage(id);
+      const url = alertPage(id) ?? trackNote(id)?.page;
       if (!url) return;
       void browser.tabs.create({ url });
+      void browser.notifications.clear(id);
+    });
+    browser.notifications.onButtonClicked.addListener((id, button) => {
+      const note = trackNote(id);
+      if (!note) return;
+      if (button === 0) void browser.tabs.create({ url: note.page });
+      else void tracker.mute(note.origin, note.walletId).catch(() => undefined);
       void browser.notifications.clear(id);
     });
 
@@ -466,6 +514,7 @@ export default defineBackground({
       },
       // Its EVM transactions are built again here from the same venues the panel uses.
       alerts,
+      tracker,
       evm: new SiteEvmChecker({
         settings,
         client,
@@ -578,6 +627,7 @@ export default defineBackground({
     browser.alarms.onAlarm.addListener((alarm) => {
       if (alarm.name === EXITS_ALARM) exits.start();
       if (alarm.name === ALERTS_ALARM) void alerts.check().catch(() => undefined);
+      if (alarm.name === TRACKER_ALARM) void tracker.check().catch(() => undefined);
       if (alarm.name === AUTOLOCK_ALARM)
         void vault.lock().then(() => push({ kind: 'nesty.vault', unlocked: false }));
     });

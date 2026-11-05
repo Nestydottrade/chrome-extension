@@ -25,6 +25,7 @@ import type {
   SiteHello,
   SitePendingView,
   SiteSolSigned,
+  SiteTracker,
   SiteWallet,
 } from './site-bridge';
 import { SolAddressSchema, isSolana } from './solana';
@@ -702,6 +703,25 @@ export const RequestSchema = z.discriminatedUnion('type', [
     })
     .strict(),
   z.object({ type: z.literal('site.alerts.remove'), id: Id }).strict(),
+  z.object({ type: z.literal('site.tracker.feed') }).strict(),
+  z
+    .object({
+      type: z.literal('site.tracker.follow'),
+      // Checked by the tracker: a Solana or an EVM address.
+      address: z.string().min(32).max(64),
+      name: z.string().max(64).optional(),
+    })
+    .strict(),
+  z.object({ type: z.literal('site.tracker.unfollow'), id: Id }).strict(),
+  z
+    .object({
+      type: z.literal('site.tracker.edit'),
+      id: Id,
+      name: z.string().max(64).optional(),
+      alerts: z.boolean().optional(),
+    })
+    .strict(),
+  z.object({ type: z.literal('site.tracker.prefs'), minUsd: z.number().min(0).max(1e9) }).strict(),
   // The approval window and the popup only.
   z.object({ type: z.literal('site.pending'), id: Id }).strict(),
   z
@@ -770,6 +790,11 @@ export const SITE_TYPES: ReadonlySet<RequestType> = new Set<RequestType>([
   'site.alerts.list',
   'site.alerts.set',
   'site.alerts.remove',
+  'site.tracker.feed',
+  'site.tracker.follow',
+  'site.tracker.unfollow',
+  'site.tracker.edit',
+  'site.tracker.prefs',
 ]);
 
 /** Requests an extension page embedded as an iframe inside a trading page may send. */
@@ -1001,6 +1026,11 @@ export interface ResponseMap {
   'site.alerts.list': SiteAlerts;
   'site.alerts.set': SiteAlert;
   'site.alerts.remove': null;
+  'site.tracker.feed': SiteTracker;
+  'site.tracker.follow': SiteTracker;
+  'site.tracker.unfollow': SiteTracker;
+  'site.tracker.edit': SiteTracker;
+  'site.tracker.prefs': SiteTracker;
   'site.pending': SitePendingView | null;
   'site.decide': null;
   'site.connections': { origin: string; at: number }[];
@@ -1039,7 +1069,8 @@ export type ErrorCode =
   | 'invalid_settings'
   | 'not_connected'
   | 'rejected'
-  | 'too_many_alerts';
+  | 'too_many_alerts'
+  | 'too_many_wallets';
 
 export type Result<T> =
   | { ok: true; data: T }

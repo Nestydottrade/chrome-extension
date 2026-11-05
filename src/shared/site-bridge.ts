@@ -1,5 +1,6 @@
 import type { AlertInput, AlertView } from './alerts';
 import type { BlockedAction } from './panel';
+import type { FollowEdit, FollowInput, TrackerView } from './tracker';
 import type { SolAddress } from './solana';
 
 /**
@@ -20,7 +21,8 @@ export const EXTENSION_SOURCE = 'nesty-extension';
 /**
  * What the site may ask for: nothing that reads a key, and no funds moved but a trade, a new
  * coin or a bridge (to an outside address only once the user approves it in the extension).
- * It may also keep price alerts in the extension, which reads the prices and notifies.
+ * It may also keep price alerts in the extension, which reads the prices and notifies, and
+ * follow wallets there, whose trades the extension reads and notifies.
  */
 export const SITE_METHODS = {
   hello: 'site.hello',
@@ -37,6 +39,11 @@ export const SITE_METHODS = {
   alerts: 'site.alerts.list',
   setAlert: 'site.alerts.set',
   removeAlert: 'site.alerts.remove',
+  trackerFeed: 'site.tracker.feed',
+  follow: 'site.tracker.follow',
+  unfollow: 'site.tracker.unfollow',
+  editFollow: 'site.tracker.edit',
+  trackerPrefs: 'site.tracker.prefs',
 } as const;
 export type SiteMethod = keyof typeof SITE_METHODS;
 
@@ -310,6 +317,11 @@ export type SiteBridgeStarted = { id: string } & SiteBridgeStatus;
 /** A price alert the site asks the extension to keep: it fires once the price is reached. */
 export type SiteAlertInput = AlertInput;
 export type SiteAlert = AlertView;
+
+/** The wallets the site follows and their trades, kept and read by the extension. */
+export type SiteTracker = TrackerView;
+export type SiteFollowInput = FollowInput;
+export type SiteFollowEdit = FollowEdit;
 
 export interface SiteAlerts {
   alerts: SiteAlert[];

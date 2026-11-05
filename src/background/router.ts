@@ -29,6 +29,7 @@ import type { SolanaService } from './solana/service';
 import type { SenderKind } from './sender';
 import { SiteError, type SiteService } from './site';
 import { AlertError } from './alerts';
+import { TrackerError } from './tracker';
 import { SettingsError, type SettingsStore } from './settings';
 import type { ExitWatcher } from './exits';
 import type { AggregatorCheck } from './trade/aggregator-check';
@@ -127,6 +128,7 @@ const PASSIVE: ReadonlySet<RequestType> = new Set<RequestType>([
   'site.hello',
   'site.wallets',
   'site.alerts.list',
+  'site.tracker.feed',
   'site.pending',
   'site.connections',
 ]);
@@ -171,6 +173,7 @@ export async function handleMessage(
       return { ok: false, error: 'invalid_settings', detail: err.message };
     if (err instanceof SiteError) return fail(err.code);
     if (err instanceof AlertError) return fail(err.code);
+    if (err instanceof TrackerError) return fail(err.code);
     if (err instanceof Error && err.message === 'unsupported_chain')
       return fail('unsupported_chain');
     if (err instanceof Error && err.message === 'permission_denied')
@@ -531,6 +534,16 @@ async function dispatch(
       return d.site.alerts(siteOrigin(meta));
     case 'site.alerts.set':
       return d.site.setAlert(siteOrigin(meta), req);
+    case 'site.tracker.feed':
+      return d.site.trackerFeed(siteOrigin(meta));
+    case 'site.tracker.follow':
+      return d.site.follow(siteOrigin(meta), req);
+    case 'site.tracker.unfollow':
+      return d.site.unfollow(siteOrigin(meta), req.id);
+    case 'site.tracker.edit':
+      return d.site.editFollow(siteOrigin(meta), req);
+    case 'site.tracker.prefs':
+      return d.site.trackerPrefs(siteOrigin(meta), req.minUsd);
     case 'site.alerts.remove':
       await d.site.removeAlert(siteOrigin(meta), req.id);
       return null;

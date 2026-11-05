@@ -11,6 +11,7 @@ import { privateKeyToAccount } from 'viem/accounts';
 import { describe, expect, it, vi } from 'vitest';
 import { erc20Abi } from '../src/background/chain/abis';
 import { AlertWatcher } from '../src/background/alerts';
+import { TrackerWatcher } from '../src/background/tracker';
 import { SettingsStore } from '../src/background/settings';
 import { SiteError, SiteService, type SiteDeps } from '../src/background/site';
 import { COMPUTE_BUDGET_PROGRAM } from '../src/background/solana/address';
@@ -112,6 +113,19 @@ function setup(
       blocked: async () => false,
       schedule: async () => undefined,
       newId: () => `alert-${++n}`,
+      now: () => state.now,
+    }),
+    // Nothing is ever read: wallets here are only kept.
+    tracker: new TrackerWatcher({
+      local: new MemoryStore(),
+      fetchJson: async () => [],
+      notify: async () => undefined,
+      blocked: async () => false,
+      schedule: async () => undefined,
+      sol: async () => ({ signatures: async () => [], transaction: async () => null }),
+      evm: async () => null,
+      evmChains: () => [],
+      newId: () => `wallet-${++n}`,
       now: () => state.now,
     }),
     settings: new SettingsStore(new MemoryStore()),

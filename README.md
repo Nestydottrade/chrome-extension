@@ -145,7 +145,11 @@ one. On every other site the extension works as described above.
   (`site.sol.sign`, `site.evm.sign`, `site.evm.permit`), a bridge
   (`site.bridge.quote`, `site.bridge.send`, `site.bridge.status`), and price alerts
   (`site.alerts.list`, `site.alerts.set`, `site.alerts.remove`), which the extension
-  keeps and checks every 30 seconds, with a notification when one is reached. It can
+  keeps and checks every 30 seconds, with a notification when one is reached. It may also
+  follow wallets (`site.tracker.feed`, `site.tracker.follow`, `site.tracker.unfollow`,
+  `site.tracker.edit`, `site.tracker.prefs`): at most 20 per site, read from the chain
+  every 30 seconds while the browser runs, Solana by signatures and EVM chains by balance
+  and sent count, with a notification (Open coin, Mute) for each new trade. It can
   never read a key, export one, change settings, or get anything else signed: no
   transfers or revokes.
 - Every Solana trade it sends is checked as the panel's are: the route is read again
