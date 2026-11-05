@@ -8,6 +8,7 @@ import {
   type Result,
 } from '../shared/messages';
 import { MIN_PASSWORD_LENGTH } from '../shared/password';
+import { extensionAlive } from './runtime';
 
 /** Typed request to the background. Never throws; transport errors become 'internal'. */
 export async function send<T extends RequestType>(
@@ -19,7 +20,8 @@ export async function send<T extends RequestType>(
     if (!env.success) return { ok: false, error: 'internal' };
     return env.data as Result<ResponseMap[T]>;
   } catch {
-    return { ok: false, error: 'internal' };
+    // On a page (the panel's), Nesty may have been updated since the page loaded.
+    return { ok: false, error: extensionAlive() ? 'internal' : 'reloaded' };
   }
 }
 
@@ -57,6 +59,7 @@ const MESSAGES: Record<ErrorCode, string> = {
   rejected: 'Declined in Nesty.',
   too_many_alerts: 'Nesty keeps up to 50 price alerts. Remove one to set another.',
   too_many_wallets: 'Nesty follows up to 20 wallets. Unfollow one to add another.',
+  reloaded: 'Nesty was updated. Reload this page to keep using it.',
 };
 
 export function errorText(res: {

@@ -1070,7 +1070,9 @@ export type ErrorCode =
   | 'not_connected'
   | 'rejected'
   | 'too_many_alerts'
-  | 'too_many_wallets';
+  | 'too_many_wallets'
+  /** Not from the background: Nesty was updated under a page that still runs its old script. */
+  | 'reloaded';
 
 export type Result<T> =
   | { ok: true; data: T }

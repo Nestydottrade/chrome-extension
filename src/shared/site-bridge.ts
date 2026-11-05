@@ -59,9 +59,13 @@ export type SitePageResponse = { source: typeof EXTENSION_SOURCE; id: string } &
   | { ok: false; error: string; detail?: string; actions?: BlockedAction[] }
 );
 
-/** Unprompted: the extension is there (on load, and in answer to a hello), or the vault locked or unlocked. */
+/**
+ * Unprompted: the extension is there (on load, and in answer to a hello), the vault locked
+ * or unlocked, or Nesty was updated since the page loaded ("gone": only a reload reaches it
+ * again; every request is answered "reloaded" until then).
+ */
 export type SitePageEvent = { source: typeof EXTENSION_SOURCE } & (
-  { event: 'ready' } | { event: 'vault'; unlocked: boolean }
+  { event: 'ready' } | { event: 'vault'; unlocked: boolean } | { event: 'gone' }
 );
 
 /** The user's limits, which every trade the site asks to sign is held to. */
