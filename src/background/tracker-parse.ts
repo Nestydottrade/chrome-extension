@@ -5,8 +5,8 @@ import { STABLE_MINTS, WSOL_MINT } from './solana/address';
 
 /**
  * Reads a followed wallet's trade out of one transaction: exactly one coin in or out, paid
- * for in the chain's coin (wrapped or not) or a dollar stablecoin. Anything else (a
- * transfer, a claim, liquidity) is not a trade.
+ * for in the chain's coin (wrapped or not) or a dollar stablecoin, or on a launchpad curve
+ * that logs the trade itself. Anything else (a transfer, a claim, liquidity) is not a trade.
  */
 
 export interface ParsedTrade {
@@ -16,9 +16,9 @@ export interface ParsedTrade {
   raw: bigint;
   /** Their decimals; null when the transaction does not say (EVM). */
   decimals: number | null;
-  /** The chain's coin paid or received, in its smallest unit; null when paid in a stablecoin. */
+  /** The chain's coin paid or received, in its smallest unit; null when paid in something else. */
   native: bigint | null;
-  /** Dollars paid or received in a stablecoin; null when paid in the chain's coin. */
+  /** Dollars paid or received in a stablecoin; null when paid in something else. */
   stableUsd: number | null;
 }
 
@@ -100,6 +100,11 @@ export function solTrade(tx: SolTxJson, owner: string): ParsedTrade | null {
 
 /** keccak256("Transfer(address,address,uint256)"). */
 export const TRANSFER_TOPIC = '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef';
+/** keccak256("CurveBuy(address,address,uint256,uint256,uint256,uint256)"), a Pons curve's buy. */
+export const CURVE_BUY_TOPIC = '0xec36bf571f136799e8dc0b0b8bea4b04d8bd3d43de838aab0d5fc21d4cbfc455';
+/** keccak256("CurveSell(address,address,uint256,uint256,uint256,uint256)"), a Pons curve's sale. */
+export const CURVE_SELL_TOPIC =
+  '0x8113d738abdcb6b38357e9d53a54a7157861a09031b453651f0fe7fe151f59df';
 /** Less of the chain's coin than this (0.000001) is a fee's rounding, not a payment. */
 const DUST_WEI = 1_000_000_000_000n;
 
@@ -109,13 +114,25 @@ export interface EvmLog {
   data: string;
 }
 
+/** An address as a log's topic holds it. */
+const asTopic = (address: string) => `0x${address.slice(2).toLowerCase().padStart(64, '0')}`;
+
+/** Three topics: an ERC-20 transfer (an NFT's has four). */
+const isTransfer = (l: EvmLog) =>
+  l.topics.length === 3 && l.topics[0]?.toLowerCase() === TRANSFER_TOPIC;
+
+/** The `index`th 32-byte word of a log's data; null when it has none. */
+function dataWord(l: EvmLog, index: number): bigint | null {
+  const hex = l.data.slice(2 + index * 64, 66 + index * 64);
+  return /^[0-9a-f]{64}$/i.test(hex) ? BigInt(`0x${hex}`) : null;
+}
+
 /** What a transaction's ERC-20 transfers moved for `wallet`, raw per token (lower case). */
 export function evmMoves(logs: readonly EvmLog[], wallet: string): Map<string, bigint> {
-  const me = `0x${wallet.slice(2).toLowerCase().padStart(64, '0')}`;
+  const me = asTopic(wallet);
   const out = new Map<string, bigint>();
   for (const l of logs) {
-    // Three topics: an ERC-20 transfer (an NFT's has four).
-    if (l.topics.length !== 3 || l.topics[0]?.toLowerCase() !== TRANSFER_TOPIC) continue;
+    if (!isTransfer(l)) continue;
     const from = l.topics[1]?.toLowerCase();
     const to = l.topics[2]?.toLowerCase();
     if ((from === me) === (to === me)) continue;
@@ -132,14 +149,52 @@ export function evmMoves(logs: readonly EvmLog[], wallet: string): Map<string, b
 }
 
 /**
+ * What a Pons curve's own event says `raw` coins cost or brought. A contract that holds its
+ * traders' money (Robinhood Chain has one) pays and gets paid for them, so only the coins
+ * move for the wallet. The event must name exactly those coins, which a transfer or a claim
+ * never does. The curve deals in the chain's coin unless another token moved through it;
+ * the payment's size is unknown in a token that is neither that nor a dollar.
+ */
+function curvePayment(
+  chain: Pick<ChainConfig, 'wrappedNative' | 'stablecoins'>,
+  logs: readonly EvmLog[],
+  { side, token, raw }: Pick<ParsedTrade, 'side' | 'token' | 'raw'>,
+): Pick<ParsedTrade, 'native' | 'stableUsd'> | null {
+  const topic = side === 'buy' ? CURVE_BUY_TOPIC : CURVE_SELL_TOPIC;
+  for (const l of logs) {
+    if (l.topics[0]?.toLowerCase() !== topic) continue;
+    // A buy logs what went in, then the coins; a sale the coins, then what came out.
+    const [quote, coins] =
+      side === 'buy' ? [dataWord(l, 0), dataWord(l, 1)] : [dataWord(l, 1), dataWord(l, 0)];
+    if (quote === null || coins !== raw) continue;
+    const curve = asTopic(l.address);
+    const paidIn = logs
+      .find(
+        (x) =>
+          isTransfer(x) &&
+          x.address.toLowerCase() !== token &&
+          (x.topics[1]?.toLowerCase() === curve || x.topics[2]?.toLowerCase() === curve),
+      )
+      ?.address.toLowerCase();
+    if (!paidIn || paidIn === chain.wrappedNative.toLowerCase())
+      return { native: quote, stableUsd: null };
+    const stable = chain.stablecoins.find((s) => s.address.toLowerCase() === paidIn);
+    return { native: null, stableUsd: stable ? Number(quote) / 10 ** stable.decimals : null };
+  }
+  return null;
+}
+
+/**
  * The trade a wallet made in one EVM transaction, from its token moves and the change in
  * its native balance, fees given back (null when that could not be read). Wrapped native
- * counts as native, the chain's stablecoins as dollars.
+ * counts as native, the chain's stablecoins as dollars. With no payment in the wallet, the
+ * transaction's logs can still hold a curve's own record of the trade.
  */
 export function evmTrade(
   chain: Pick<ChainConfig, 'wrappedNative' | 'stablecoins'>,
   moves: ReadonlyMap<string, bigint>,
   nativeDelta: bigint | null,
+  logs: readonly EvmLog[],
 ): ParsedTrade | null {
   const wrapped = chain.wrappedNative.toLowerCase();
   const stables = new Map(chain.stablecoins.map((s) => [s.address.toLowerCase(), s.decimals]));
@@ -165,7 +220,8 @@ export function evmTrade(
     return { ...trade, native: null, stableUsd: Math.abs(usd) };
   if (native !== null && abs(native) >= DUST_WEI && (side === 'buy' ? native < 0n : native > 0n))
     return { ...trade, native: abs(native), stableUsd: null };
-  return null;
+  const paid = curvePayment(chain, logs, trade);
+  return paid && { ...trade, ...paid };
 }
 
 // ── Price feed ──────────────────────────────────────────────────────────────

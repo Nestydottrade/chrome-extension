@@ -1,5 +1,6 @@
 import { alertSlug } from '../shared/alerts';
 import { getChain, type ChainConfig } from '../shared/chains';
+import { sanitizeLabel } from '../shared/sanitize';
 import { SOLANA_CHAIN_ID, isSolana } from '../shared/solana';
 import {
   MAX_FOLLOWED,
@@ -95,6 +96,7 @@ export interface EvmReader {
   block(block: bigint): Promise<{ at: number; txs: EvmTx[] }>;
   receipt(hash: string): Promise<EvmReceipt | null>;
   decimals(token: string): Promise<number | null>;
+  symbol(token: string): Promise<string | null>;
 }
 
 export interface TrackerDeps {
@@ -216,6 +218,8 @@ export class TrackerWatcher {
   private startedAt = 0;
   /** `${chainId}:${token}` → decimals: they never change. */
   private readonly decimals = new Map<string, number>();
+  /** `${chainId}:${token}` → symbol, as the coin itself says. */
+  private readonly symbols = new Map<string, string>();
 
   constructor(private readonly d: TrackerDeps) {}
 
@@ -549,6 +553,10 @@ export class TrackerWatcher {
    * Private RPC: the search reads balances and sent counts at past blocks. BNB Chain's own
    * nodes keep only about 128 blocks of state; the next public RPC answers today
    * (docs/private-rpc.md).
+   *
+   * Private RPC: a trade another account sent for the wallet (a bot, a smart account's
+   * bundler) moves neither its sent count nor, often, its balance, so it is not seen. Finding
+   * one takes coin transfers by wallet, which most public RPCs refuse (docs/private-rpc.md).
    */
   private async readEvm(
     chainId: number,
@@ -617,10 +625,7 @@ export class TrackerWatcher {
       }
       const [blk, after] = await Promise.all([reader.block(b), reader.nonce(address, b)]);
       const mine = blk.txs.filter((t) => t.from === address);
-      for (const t of mine) {
-        const trade = await this.evmTx(chain, reader, address, b, t, mine.length === 1, blk.at);
-        if (trade) out.push(trade);
-      }
+      out.push(...(await this.evmBlock(chain, reader, address, b, mine, blk.at)));
       if (after <= seen) break;
       seen = after;
       lo = b;
@@ -628,35 +633,62 @@ export class TrackerWatcher {
     return out;
   }
 
-  private async evmTx(
+  /** The trades among the transactions `address` sent in one block. */
+  private async evmBlock(
     chain: ChainConfig,
     reader: EvmReader,
     address: string,
     block: bigint,
-    t: EvmTx,
-    alone: boolean,
+    mine: readonly EvmTx[],
     at: number,
-  ): Promise<TrackedTrade | null> {
-    const receipt = await reader.receipt(t.hash);
-    if (!receipt?.ok) return null;
-    const moves = evmMoves(receipt.logs, address);
-    if (moves.size === 0) return null;
-    // What it paid or got in the chain's coin: its balance across the block, fees given
-    // back. With two of its transactions in one block, only what it sent along is known.
-    let delta: bigint | null = null;
-    if (alone) {
-      const [[after], [prior]] = await Promise.all([
-        reader.balances([address], block),
-        reader.balances([address], block - 1n),
-      ]);
-      if (typeof after === 'bigint' && typeof prior === 'bigint')
-        delta = after - prior + receipt.fee;
-    } else if (t.value > 0n) delta = -t.value;
-    const p = evmTrade(chain, moves, delta);
-    if (!p) return null;
-    const decimals = await this.decimalsOf(chain.id, p.token, reader);
-    if (decimals === null) return null;
-    return this.trade(chain.id, address, t.hash, at, p, decimals, chain.nativeCurrency.decimals);
+  ): Promise<TrackedTrade[]> {
+    const sent = await Promise.all(
+      mine.map(async (t) => {
+        const receipt = await reader.receipt(t.hash);
+        const logs = receipt?.ok ? receipt.logs : [];
+        return { t, receipt, logs, moves: evmMoves(logs, address) };
+      }),
+    );
+    const moved = sent.filter((s) => s.moves.size > 0);
+    // With coins moved in two of them, the balance cannot tell their payments apart.
+    const only = moved.length === 1 ? moved[0]?.t : undefined;
+    const delta = only ? await this.blockDelta(reader, address, block, sent, only) : null;
+    const out: TrackedTrade[] = [];
+    for (const { t, logs, moves } of moved) {
+      const p = evmTrade(chain, moves, delta ?? (t.value > 0n ? -t.value : null), logs);
+      if (!p) continue;
+      const decimals = await this.decimalsOf(chain.id, p.token, reader);
+      if (decimals === null) continue;
+      const native = chain.nativeCurrency.decimals;
+      const symbol = await this.symbolOf(chain.id, p.token, reader);
+      out.push({ ...this.trade(chain.id, address, t.hash, at, p, decimals, native), symbol });
+    }
+    return out;
+  }
+
+  /**
+   * What the transaction `t` paid or got in the chain's coin: the wallet's balance across
+   * the block, with every fee given back and what its other transactions there sent. Bots
+   * send an approval right before a sale, in the same block. Null when it cannot be read.
+   */
+  private async blockDelta(
+    reader: EvmReader,
+    address: string,
+    block: bigint,
+    sent: readonly { t: EvmTx; receipt: EvmReceipt | null }[],
+    t: EvmTx,
+  ): Promise<bigint | null> {
+    let spent = 0n;
+    for (const s of sent) {
+      if (!s.receipt) return null;
+      spent += s.receipt.fee + (s.t !== t && s.receipt.ok ? s.t.value : 0n);
+    }
+    const [[after], [prior]] = await Promise.all([
+      reader.balances([address], block),
+      reader.balances([address], block - 1n),
+    ]);
+    if (typeof after !== 'bigint' || typeof prior !== 'bigint') return null;
+    return after - prior + spent;
   }
 
   private async decimalsOf(
@@ -671,6 +703,21 @@ export class TrackerWatcher {
     if (d === null || !Number.isInteger(d) || d < 0 || d > 36) return null;
     this.decimals.set(key, d);
     return d;
+  }
+
+  /** The coin's own symbol: the price feed knows few coins still on a curve. */
+  private async symbolOf(
+    chainId: number,
+    token: string,
+    reader: EvmReader,
+  ): Promise<string | null> {
+    const key = `${chainId}:${token}`;
+    const known = this.symbols.get(key);
+    if (known !== undefined) return known;
+    const symbol = sanitizeLabel(await reader.symbol(token).catch(() => null), 16);
+    if (!symbol) return null;
+    this.symbols.set(key, symbol);
+    return symbol;
   }
 
   /** New trades with their coin's symbol, their USD value then and the market cap at their price. */

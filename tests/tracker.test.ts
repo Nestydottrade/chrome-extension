@@ -1,13 +1,17 @@
+import { toEventSelector } from 'viem';
 import { describe, expect, it } from 'vitest';
 import {
   TrackerError,
   TrackerWatcher,
   type EvmReader,
+  type EvmReceipt,
   type SolReader,
   type TrackerDeps,
 } from '../src/background/tracker';
 import { trackNote, tradeText } from '../src/background/tracker-notes';
 import {
+  CURVE_BUY_TOPIC,
+  CURVE_SELL_TOPIC,
   TRANSFER_TOPIC,
   coinsFromFeed,
   evmMoves,
@@ -35,7 +39,23 @@ const EVM_WALLET = '0x00000000000000000000000000000000000A11CE';
 const W = EVM_WALLET.toLowerCase();
 const COIN = '0x00000000000000000000000000000000000070c0';
 const PAIR = '0x0000000000000000000000000000000000000fee';
+const CURVE = '0x00000000000000000000000000000000000c0de0';
+const HOLDER = '0x0000000000000000000000000000000000000401';
 const T0 = 1_700_000_000_000;
+
+const pad = (a: string) => `0x${a.slice(2).toLowerCase().padStart(64, '0')}`;
+const word = (n: bigint) => n.toString(16).padStart(64, '0');
+const transfer = (token: string, from: string, to: string, amount: bigint): EvmLog => ({
+  address: token,
+  topics: [TRANSFER_TOPIC, pad(from), pad(to)],
+  data: `0x${word(amount)}`,
+});
+/** A Pons curve's event: a buy's quote in and coins out, a sale's coins in and quote out. */
+const curveLog = (topic: string, first: bigint, second: bigint): EvmLog => ({
+  address: CURVE,
+  topics: [topic, pad(HOLDER), pad(EVM_WALLET)],
+  data: `0x${word(first)}${word(second)}${word(1n)}${word(0n)}`,
+});
 
 class Memory {
   data = new Map<string, unknown>();
@@ -134,16 +154,9 @@ describe('reading a trade from a transaction', () => {
     expect(solTrade(bought, 'Someone' + '1'.repeat(37))).toBeNull();
   });
 
-  const pad = (a: string) => `0x${a.slice(2).toLowerCase().padStart(64, '0')}`;
-  const transfer = (token: string, from: string, to: string, amount: bigint): EvmLog => ({
-    address: token,
-    topics: [TRANSFER_TOPIC, pad(from), pad(to)],
-    data: `0x${amount.toString(16).padStart(64, '0')}`,
-  });
-
   it('EVM: a buy paid in ETH, a sell for WETH, a buy in USDC', () => {
     const buy = evmMoves([transfer(COIN, PAIR, EVM_WALLET, 10n ** 21n)], EVM_WALLET);
-    expect(evmTrade(base, buy, -(10n ** 17n))).toEqual({
+    expect(evmTrade(base, buy, -(10n ** 17n), [])).toEqual({
       side: 'buy',
       token: COIN,
       raw: 10n ** 21n,
@@ -158,7 +171,7 @@ describe('reading a trade from a transaction', () => {
       ],
       EVM_WALLET,
     );
-    expect(evmTrade(base, sell, 0n)).toMatchObject({ side: 'sell', native: 2n * 10n ** 16n });
+    expect(evmTrade(base, sell, 0n, [])).toMatchObject({ side: 'sell', native: 2n * 10n ** 16n });
     const usdc = evmMoves(
       [
         transfer(USDC_BASE, EVM_WALLET, PAIR, 25_000_000n),
@@ -166,15 +179,19 @@ describe('reading a trade from a transaction', () => {
       ],
       EVM_WALLET,
     );
-    expect(evmTrade(base, usdc, -3n)).toMatchObject({ side: 'buy', native: null, stableUsd: 25 });
+    expect(evmTrade(base, usdc, -3n, [])).toMatchObject({
+      side: 'buy',
+      native: null,
+      stableUsd: 25,
+    });
   });
 
   it('EVM: a claim, a transfer out or two coins at once is no trade', () => {
     const claim = evmMoves([transfer(COIN, PAIR, EVM_WALLET, 10n ** 18n)], EVM_WALLET);
     // A fee's rounding is not a payment.
-    expect(evmTrade(base, claim, -40n)).toBeNull();
+    expect(evmTrade(base, claim, -40n, [])).toBeNull();
     const out = evmMoves([transfer(COIN, EVM_WALLET, PAIR, 10n ** 18n)], EVM_WALLET);
-    expect(evmTrade(base, out, 0n)).toBeNull();
+    expect(evmTrade(base, out, 0n, [])).toBeNull();
     const lp = evmMoves(
       [
         transfer(COIN, EVM_WALLET, PAIR, 10n ** 18n),
@@ -182,7 +199,82 @@ describe('reading a trade from a transaction', () => {
       ],
       EVM_WALLET,
     );
-    expect(evmTrade(base, lp, -(10n ** 17n))).toBeNull();
+    expect(evmTrade(base, lp, -(10n ** 17n), [])).toBeNull();
+  });
+
+  it('EVM: knows a Pons curve’s events', () => {
+    const args = 'address,address,uint256,uint256,uint256,uint256';
+    expect(toEventSelector(`CurveBuy(${args})`)).toBe(CURVE_BUY_TOPIC);
+    expect(toEventSelector(`CurveSell(${args})`)).toBe(CURVE_SELL_TOPIC);
+  });
+
+  it('EVM: a curve trade paid by a contract that holds the wallet’s money', () => {
+    const coins = 10n ** 21n;
+    const paid = 64n * 10n ** 15n;
+    const bought = [
+      transfer(COIN, CURVE, EVM_WALLET, coins),
+      curveLog(CURVE_BUY_TOPIC, paid, coins),
+    ];
+    expect(evmTrade(base, evmMoves(bought, EVM_WALLET), 0n, bought)).toEqual({
+      side: 'buy',
+      token: COIN,
+      raw: coins,
+      decimals: null,
+      native: paid,
+      stableUsd: null,
+    });
+    const sold = [
+      transfer(COIN, EVM_WALLET, HOLDER, coins),
+      transfer(COIN, HOLDER, CURVE, coins),
+      curveLog(CURVE_SELL_TOPIC, coins, paid),
+    ];
+    // The balance could not be read, or moved by a fee's rounding only.
+    for (const delta of [null, 40n]) {
+      expect(evmTrade(base, evmMoves(sold, EVM_WALLET), delta, sold)).toMatchObject({
+        side: 'sell',
+        native: paid,
+      });
+    }
+  });
+
+  it('EVM: what the wallet paid itself comes before what the curve logs', () => {
+    const logs = [
+      transfer(COIN, CURVE, EVM_WALLET, 10n ** 21n),
+      curveLog(CURVE_BUY_TOPIC, 10n ** 16n, 10n ** 21n),
+    ];
+    expect(evmTrade(base, evmMoves(logs, EVM_WALLET), -(10n ** 17n), logs)).toMatchObject({
+      native: 10n ** 17n,
+    });
+  });
+
+  it('EVM: a curve’s event says nothing of coins it does not name', () => {
+    const coins = 10n ** 21n;
+    const moved = [transfer(COIN, PAIR, EVM_WALLET, coins)];
+    const moves = evmMoves(moved, EVM_WALLET);
+    // Someone else's trade in the same transaction, the other side, or a log cut short.
+    const others: EvmLog[] = [
+      curveLog(CURVE_BUY_TOPIC, 10n ** 16n, coins + 1n),
+      curveLog(CURVE_SELL_TOPIC, coins, 10n ** 16n),
+      { ...curveLog(CURVE_BUY_TOPIC, 10n ** 16n, coins), data: '0x' },
+    ];
+    for (const other of others) expect(evmTrade(base, moves, 0n, [...moved, other])).toBeNull();
+  });
+
+  it('EVM: a curve paired with wrapped ETH, a dollar or another coin', () => {
+    const coins = 10n ** 21n;
+    const OTHER = '0x0000000000000000000000000000000000000c01';
+    const read = (token: string, amount: bigint) => {
+      const logs = [
+        transfer(COIN, CURVE, EVM_WALLET, coins),
+        transfer(token, HOLDER, CURVE, amount),
+        curveLog(CURVE_BUY_TOPIC, amount, coins),
+      ];
+      return evmTrade(base, evmMoves(logs, EVM_WALLET), 0n, logs);
+    };
+    expect(read(WETH, 10n ** 16n)).toMatchObject({ native: 10n ** 16n, stableUsd: null });
+    expect(read(USDC_BASE, 25_000_000n)).toMatchObject({ native: null, stableUsd: 25 });
+    // Still a trade, of a size only that coin can tell.
+    expect(read(OTHER, 10n ** 18n)).toMatchObject({ side: 'buy', native: null, stableUsd: null });
   });
 });
 
@@ -245,6 +337,46 @@ function solChain() {
     add(sig: string, tx: SolTxJson) {
       sigs.unshift({ sig, at: (tx.blockTime ?? 0) * 1000 });
       txs.set(sig, tx);
+    },
+  };
+}
+
+const ETH = 10n ** 18n;
+const FEE = ETH / 10_000n;
+const hashOf = (n: number) => `0x${n.toString(16).padStart(64, '0')}`;
+
+/** An EVM wallet's chain: the test adds blocks of its transactions and what they did to its balance. */
+function evmChain() {
+  let head = 100n;
+  // By the end of a block: [sent, balance].
+  const history: [bigint, number, bigint][] = [[0n, 5, ETH]];
+  const at = (b: bigint) => [...history].reverse().find(([block]) => block <= b)!;
+  const blocks = new Map<bigint, { hash: string; from: string; value: bigint }[]>();
+  const receipts = new Map<string, EvmReceipt>();
+  const reader: EvmReader = {
+    head: async () => head,
+    balances: async (_a, b) => [at(b)[2]],
+    nonce: async (_a, b) => at(b)[1],
+    block: async (b) => ({ at: T0 + Number(b) * 1000, txs: blocks.get(b) ?? [] }),
+    receipt: async (h) => receipts.get(h) ?? null,
+    decimals: async () => 18,
+    symbol: async () => 'CURVY',
+  };
+  return {
+    reader,
+    add(
+      block: bigint,
+      change: bigint,
+      txs: { hash: string; value?: bigint; ok?: boolean; logs?: EvmLog[] }[],
+    ) {
+      const [, sent, balance] = at(block);
+      history.push([block, sent + txs.length, balance + change]);
+      blocks.set(
+        block,
+        txs.map((t) => ({ hash: t.hash, from: W, value: t.value ?? 0n })),
+      );
+      for (const t of txs) receipts.set(t.hash, { ok: t.ok ?? true, fee: FEE, logs: t.logs ?? [] });
+      head = block + 13n;
     },
   };
 }
@@ -394,6 +526,7 @@ describe('wallet tracker', () => {
             }
           : null,
       decimals: async () => 18,
+      symbol: async () => 'ONCHAIN',
     };
     const { w, notes, tick } = setup({
       evm: reader,
@@ -443,6 +576,70 @@ describe('wallet tracker', () => {
     expect(notes.map((x) => [x.title, x.message])).toEqual([
       ['Alice bought BASED', '0.10 ETH ($300) at $300K MC on Base'],
     ]);
+  });
+
+  /** The trades of the transactions the test puts in a block, seen by a wallet already followed. */
+  async function watch(add: (chain: ReturnType<typeof evmChain>) => void) {
+    const chain = evmChain();
+    const s = setup({ evm: chain.reader });
+    await s.w.follow(SITE, { address: EVM_WALLET, name: 'Alice' });
+    await s.w.check();
+    s.tick(30_000);
+    add(chain);
+    await s.w.check();
+    return { trades: (await s.w.feed(SITE)).trades, notes: s.notes };
+  }
+
+  const coinsOut = [transfer(COIN, EVM_WALLET, PAIR, 1_000n * ETH)];
+  const coinsIn = [transfer(COIN, PAIR, EVM_WALLET, 1_000n * ETH)];
+
+  it('gives a sale its payment when an approval went first in the same block', async () => {
+    const { trades } = await watch((c) =>
+      c.add(107n, ETH / 2n - 2n * FEE, [{ hash: hashOf(1) }, { hash: hashOf(2), logs: coinsOut }]),
+    );
+    expect(trades).toMatchObject([{ hash: hashOf(2), side: 'sell', native: 0.5 }]);
+  });
+
+  it('leaves out what its other transactions in the block sent, or failed to', async () => {
+    const { trades } = await watch((c) =>
+      c.add(107n, ETH / 2n - ETH / 100n - 3n * FEE, [
+        { hash: hashOf(1), value: ETH / 100n },
+        { hash: hashOf(2), value: ETH, ok: false },
+        { hash: hashOf(3), logs: coinsOut },
+      ]),
+    );
+    expect(trades).toMatchObject([{ hash: hashOf(3), side: 'sell', native: 0.5 }]);
+  });
+
+  it('with two trades in one block, keeps only what each sent along', async () => {
+    const { trades } = await watch((c) =>
+      c.add(107n, ETH / 2n - ETH / 10n - 2n * FEE, [
+        { hash: hashOf(1), value: ETH / 10n, logs: coinsIn },
+        { hash: hashOf(2), logs: coinsOut },
+      ]),
+    );
+    expect(trades).toMatchObject([{ hash: hashOf(1), side: 'buy', native: 0.1 }]);
+  });
+
+  it('reads a curve trade paid by a contract, and names a coin the feed does not know', async () => {
+    const logs = [
+      transfer(COIN, EVM_WALLET, HOLDER, 1_000n * ETH),
+      transfer(COIN, HOLDER, CURVE, 1_000n * ETH),
+      curveLog(CURVE_SELL_TOPIC, 1_000n * ETH, ETH / 50n),
+    ];
+    const { trades, notes } = await watch((c) => c.add(107n, -FEE, [{ hash: hashOf(1), logs }]));
+    expect(trades).toMatchObject([{ side: 'sell', native: 0.02, symbol: 'CURVY', usd: null }]);
+    expect(notes.map((x) => [x.title, x.message])).toEqual([
+      ['Alice sold CURVY', '0.020 ETH on Base'],
+    ]);
+  });
+
+  it('a transfer out, with nothing but the fee gone, is still no trade', async () => {
+    const { trades, notes } = await watch((c) =>
+      c.add(107n, -FEE, [{ hash: hashOf(1), logs: coinsOut }]),
+    );
+    expect(trades).toEqual([]);
+    expect(notes).toEqual([]);
   });
 });
 

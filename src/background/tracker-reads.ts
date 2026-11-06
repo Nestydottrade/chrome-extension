@@ -85,5 +85,7 @@ export function evmReader(client: PublicClient): EvmReader {
       });
       return Number(d);
     },
+    symbol: (token) =>
+      client.readContract({ address: token as Address, abi: erc20Abi, functionName: 'symbol' }),
   };
 }
