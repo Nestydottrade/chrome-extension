@@ -2,8 +2,8 @@ import { formatUnits } from 'viem';
 import { getChain } from './chains';
 import { formatCompact, formatPercent } from './format';
 import { nativeSymbol } from './networks';
-import type { TicketLeg, TradeTicket } from './panel';
-import type { RealizedSell } from './pnl';
+import type { TradeTicket } from './panel';
+import { ticketFills, type RealizedSell } from './pnl';
 import { isSolana } from './solana';
 
 /**
@@ -125,30 +125,19 @@ export function positionTrail(
     const wasOpen = open();
     let paid = 0n;
     let tokens = 0n;
-    for (const id of p.walletIds) {
-      const legs = t.legs.filter((l) => l.walletId === id);
-      const done = (kind: TicketLeg['kind']) =>
-        legs.find((l) => l.kind === kind && l.status === 'confirmed');
-      const swap = done('swap');
-      if (!swap) continue;
-      const pos = held.get(id) ?? 0n;
+    for (const f of ticketFills(t)) {
+      if (!p.walletIds.includes(f.walletId)) continue;
+      const pos = held.get(f.walletId) ?? 0n;
       if (t.kind === 'buy') {
-        // A funded curve bought in two transactions paid in its first step.
-        const pay = done('step')?.amountIn ?? swap.amountIn;
-        if (!pay || !swap.amountOut) continue;
-        held.set(id, pos + BigInt(swap.amountOut));
-        paid += BigInt(pay);
-        tokens += BigInt(swap.amountOut);
+        held.set(f.walletId, pos + f.tokens);
+        paid += f.paid;
+        tokens += f.tokens;
       } else {
-        if (!swap.amountIn || pos === 0n) continue;
-        const sold = BigInt(swap.amountIn);
-        held.set(id, sold < pos ? pos - sold : 0n);
-        // A funded curve's sell comes back to the chain's coin in a step after the swap.
-        const step = legs.find((l) => l.kind === 'step');
-        const got = step ? done('step')?.amountOut : swap.amountOut;
-        if (!got || sold === 0n) continue;
-        paid += BigInt(got);
-        tokens += sold;
+        if (pos === 0n) continue;
+        held.set(f.walletId, f.tokens < pos ? pos - f.tokens : 0n);
+        if (f.fetched === null) continue;
+        paid += f.fetched;
+        tokens += f.tokens;
       }
     }
     if (t.kind === 'buy' && !wasOpen && open()) {

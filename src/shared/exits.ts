@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import type { CostBasis } from './pnl';
+import { coveredPart, type CostBasis } from './pnl';
 
 /** A token's plan holds at most this many steps. */
 export const MAX_EXIT_RULES = 8;
@@ -73,10 +73,10 @@ export function coveredCost(
   let costWei = 0n;
   for (const h of held) {
     const b = basis.get(h.walletId);
-    if (!b || b.tokens <= 0n || h.token <= 0n) continue;
-    const part = h.token < b.tokens ? h.token : b.tokens;
-    covered += part;
-    costWei += (b.costWei * part) / b.tokens;
+    if (!b) continue;
+    const part = coveredPart(h.token, b);
+    covered += part.tokens;
+    costWei += part.costWei;
   }
   return { covered, costWei };
 }
