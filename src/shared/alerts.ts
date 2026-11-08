@@ -1,5 +1,6 @@
 import { getChain } from './chains';
 import { formatCompact, formatTiny } from './format';
+import { feedPairs } from './main-pair';
 import { isNestySite } from './nesty-site';
 import { sanitizeLabel } from './sanitize';
 import { isSolana } from './solana';
@@ -70,37 +71,17 @@ export function alertToken(chainId: number, token: string): string | null {
 
 export const alertSymbol = (symbol: string): string => sanitizeLabel(symbol, 16) || 'A coin';
 
-interface FeedPair {
-  baseToken?: { address?: unknown };
-  priceUsd?: unknown;
-  liquidity?: { usd?: unknown };
-}
-
 /**
- * Each asked-for coin's USD price, from the price feed's answer: its most liquid pair's,
- * among those it is the base of. A coin the answer leaves out has none.
+ * Each asked-for coin's USD price, from the price feed's answer: its main pair's. A coin the
+ * answer leaves out has none.
  */
 export function pricesFromFeed(
   chainId: number,
   tokens: readonly string[],
   json: unknown,
 ): Map<string, number> {
-  const pairs: unknown = Array.isArray(json) ? json : (json as { pairs?: unknown } | null)?.pairs;
-  const best = new Map<string, { liquidity: number; price: number }>();
-  if (!Array.isArray(pairs)) return new Map();
-  const wanted = new Set(tokens);
-  for (const p of pairs as (FeedPair | null)[]) {
-    const raw = p?.baseToken?.address;
-    const token = typeof raw === 'string' ? alertToken(chainId, raw) : null;
-    if (!token || !wanted.has(token)) continue;
-    const price = Number(p?.priceUsd);
-    if (!Number.isFinite(price) || price <= 0) continue;
-    const liquidity = Number(p?.liquidity?.usd);
-    const l = Number.isFinite(liquidity) ? liquidity : 0;
-    const cur = best.get(token);
-    if (!cur || l > cur.liquidity) best.set(token, { liquidity: l, price });
-  }
-  return new Map([...best].map(([t, b]) => [t, b.price]));
+  const pairs = feedPairs(json, tokens, (address) => alertToken(chainId, address));
+  return new Map([...pairs].map(([t, p]) => [t, p.priceUsd]));
 }
 
 /** True when the price reached the alert's. */

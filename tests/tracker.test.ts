@@ -699,4 +699,34 @@ describe('tracker texts', () => {
     );
     expect([...coins]).toEqual([[COIN, { symbol: 'NEW', priceUsd: 2, mcap: 20 }]]);
   });
+
+  it('reads a coin from the pair the site calls its main one', () => {
+    const coins = coinsFromFeed(
+      BASE,
+      [COIN],
+      [
+        {
+          dexId: 'meteora',
+          baseToken: { address: COIN, symbol: 'THIN' },
+          priceUsd: '1',
+          fdv: 10,
+          liquidity: { usd: 42 },
+          txns: { h1: { buys: 1, sells: 0 } },
+        },
+        {
+          dexId: 'pumpswap',
+          baseToken: { address: COIN, symbol: 'BUSY' },
+          priceUsd: '2',
+          marketCap: 20,
+          txns: { h1: { buys: 30, sells: 5 } },
+        },
+        {
+          dexId: 'pumpswap',
+          baseToken: { address: COIN, symbol: 'NOPRICE' },
+          txns: { h1: { buys: 300, sells: 50 } },
+        },
+      ],
+    );
+    expect([...coins]).toEqual([[COIN, { symbol: 'BUSY', priceUsd: 2, mcap: 20 }]]);
+  });
 });

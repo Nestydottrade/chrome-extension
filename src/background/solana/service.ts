@@ -1,5 +1,6 @@
 import { base58 } from '@scure/base';
 import { formatUnits, parseUnits, type Address } from 'viem';
+import { feedPairs, type FeedPair } from '../../shared/main-pair';
 import type { Portfolio, PortfolioTokenView } from '../../shared/messages';
 import type {
   BlockedAction,
@@ -959,25 +960,14 @@ export class SolanaService {
     return usd;
   }
 
-  /** The pool index's USD price of `mint`, from its most liquid Solana pair. */
+  /** The pool index's USD price of `mint`, from its main Solana pair. */
   private async indexPrice(mint: SolAddress): Promise<number | null> {
     if (!this.d.fetchJson) return null;
     const json = (await this.d.fetchJson(
       `https://api.dexscreener.com/latest/dex/tokens/${mint}`,
-    )) as {
-      pairs?: {
-        chainId?: string;
-        baseToken?: { address?: string };
-        priceUsd?: string;
-        liquidity?: { usd?: number };
-      }[];
-    } | null;
-    const pairs = (json?.pairs ?? []).filter(
-      (p) => p.chainId === 'solana' && p.baseToken?.address === mint && Number(p.priceUsd) > 0,
-    );
-    pairs.sort((a, b) => (b.liquidity?.usd ?? 0) - (a.liquidity?.usd ?? 0));
-    const usd = Number(pairs[0]?.priceUsd);
-    return Number.isFinite(usd) && usd > 0 ? usd : null;
+    )) as { pairs?: (FeedPair & { chainId?: string })[] } | null;
+    const pairs = (json?.pairs ?? []).filter((p) => p.chainId === 'solana');
+    return feedPairs(pairs, [mint], (address) => address).get(mint)?.priceUsd ?? null;
   }
 
   /**

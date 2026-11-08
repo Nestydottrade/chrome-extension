@@ -1,5 +1,6 @@
 import { alertToken } from '../shared/alerts';
 import type { ChainConfig } from '../shared/chains';
+import { feedPairs } from '../shared/main-pair';
 import { sanitizeLabel } from '../shared/sanitize';
 import { STABLE_MINTS, WSOL_MINT } from './solana/address';
 
@@ -226,14 +227,6 @@ export function evmTrade(
 
 // ── Price feed ──────────────────────────────────────────────────────────────
 
-interface FeedPair {
-  baseToken?: { address?: unknown; symbol?: unknown };
-  priceUsd?: unknown;
-  marketCap?: unknown;
-  fdv?: unknown;
-  liquidity?: { usd?: unknown };
-}
-
 export interface FeedCoin {
   symbol: string | null;
   priceUsd: number;
@@ -242,36 +235,23 @@ export interface FeedCoin {
 }
 
 /**
- * Each asked-for coin's symbol, USD price and market cap, from the price feed's answer:
- * its most liquid pair's, among those it is the base of.
+ * Each asked-for coin's symbol, USD price and market cap, from the price feed's answer: its
+ * main pair's.
  */
 export function coinsFromFeed(
   chainId: number,
   tokens: readonly string[],
   json: unknown,
 ): Map<string, FeedCoin> {
-  const pairs: unknown = Array.isArray(json) ? json : (json as { pairs?: unknown } | null)?.pairs;
-  const best = new Map<string, FeedCoin>();
-  const depth = new Map<string, number>();
-  if (!Array.isArray(pairs)) return best;
-  const wanted = new Set(tokens);
-  for (const p of pairs as (FeedPair | null)[]) {
-    const raw = p?.baseToken?.address;
-    const token = typeof raw === 'string' ? alertToken(chainId, raw) : null;
-    if (!token || !wanted.has(token)) continue;
-    const priceUsd = Number(p?.priceUsd);
-    if (!Number.isFinite(priceUsd) || priceUsd <= 0) continue;
-    const l = Number(p?.liquidity?.usd);
-    const liquidity = Number.isFinite(l) ? l : 0;
-    const cur = depth.get(token);
-    if (cur !== undefined && liquidity <= cur) continue;
-    const cap = [p?.marketCap, p?.fdv].map(Number).find((v) => Number.isFinite(v) && v > 0);
-    depth.set(token, liquidity);
-    best.set(token, {
-      symbol: sanitizeLabel(p?.baseToken?.symbol, 16) || null,
+  const coins = new Map<string, FeedCoin>();
+  const pairs = feedPairs(json, tokens, (address) => alertToken(chainId, address));
+  for (const [token, { feed, priceUsd }] of pairs) {
+    const cap = [feed.marketCap, feed.fdv].map(Number).find((v) => Number.isFinite(v) && v > 0);
+    coins.set(token, {
+      symbol: sanitizeLabel(feed.baseToken?.symbol, 16) || null,
       priceUsd,
       mcap: cap ?? null,
     });
   }
-  return best;
+  return coins;
 }
