@@ -1,28 +1,37 @@
 import { describe, expect, it } from 'vitest';
 import { CONTENT_TYPES, RequestSchema } from '../src/shared/messages';
 import { passwordNeeds } from '../src/shared/password';
+import { passwordHint } from '../src/ui/password-hint';
 
 describe('new wallet password', () => {
-  it('needs 12 characters with an uppercase letter, a lowercase letter, a number and a symbol', () => {
-    expect(passwordNeeds('')).toEqual(['length', 'upper', 'lower', 'digit', 'symbol']);
-    expect(passwordNeeds('Tr0ub4d!')).toEqual(['length']);
-    expect(passwordNeeds('tr0ub4dor&3x')).toEqual(['upper']);
-    expect(passwordNeeds('TR0UB4DOR&3X')).toEqual(['lower']);
-    expect(passwordNeeds('Troubadour&xx')).toEqual(['digit']);
-    expect(passwordNeeds('Troubador3xx')).toEqual(['symbol']);
-    expect(passwordNeeds('Tr0ub4dor&3x')).toEqual([]);
+  it('needs 10 characters with an uppercase letter, a lowercase letter and a number', () => {
+    expect(passwordNeeds('')).toEqual(['length', 'upper', 'lower', 'digit']);
+    expect(passwordNeeds('Tr0ub4dor')).toEqual(['length']);
+    expect(passwordNeeds('tr0ub4dor3')).toEqual(['upper']);
+    expect(passwordNeeds('TR0UB4DOR3')).toEqual(['lower']);
+    expect(passwordNeeds('Troubadours')).toEqual(['digit']);
+    expect(passwordNeeds('Tr0ub4dor3')).toEqual([]);
   });
 
-  it('does not count a space as a symbol', () => {
-    expect(passwordNeeds('Correct horse battery 9')).toEqual(['symbol']);
-    expect(passwordNeeds('Correct horse battery 9!')).toEqual([]);
+  it('asks for no symbol, and takes one', () => {
+    expect(passwordNeeds('Correct horse battery 9')).toEqual([]);
+    expect(passwordNeeds('Tr0ub4dor&3x')).toEqual([]);
   });
 
   it('takes letters beyond English and counts an emoji as one character', () => {
     expect(passwordNeeds('Ölçü-Şifre-2026')).toEqual([]);
     expect(passwordNeeds('ÖLÇÜ-ŞIFRE-2026')).toEqual(['lower']);
-    expect(passwordNeeds('Ab1' + '🥚'.repeat(8))).toEqual(['length']);
-    expect(passwordNeeds('Ab1' + '🥚'.repeat(9))).toEqual([]);
+    expect(passwordNeeds('Ab1' + '🥚'.repeat(6))).toEqual(['length']);
+    expect(passwordNeeds('Ab1' + '🥚'.repeat(7))).toEqual([]);
+  });
+
+  it('names the rule, then only what the password lacks', () => {
+    expect(passwordHint('')).toBe(
+      'At least 10 characters, with an uppercase letter, a lowercase letter and a number.',
+    );
+    expect(passwordHint('Tr0ub4dor')).toBe('Add 1 more character.');
+    expect(passwordHint('troubadour')).toBe('Add an uppercase letter and a number.');
+    expect(passwordHint('Tr0ub4dor3')).toBeUndefined();
   });
 });
 

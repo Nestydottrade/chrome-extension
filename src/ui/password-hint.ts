@@ -9,13 +9,12 @@ const NEED_TEXT: Record<Exclude<PasswordNeed, 'length'>, string> = {
   upper: 'an uppercase letter',
   lower: 'a lowercase letter',
   digit: 'a number',
-  symbol: 'a symbol',
 };
 
 /** The rule while the field is empty, then only what the password still lacks. */
 export function passwordHint(password: string): string | undefined {
   if (!password) {
-    return `At least ${MIN_PASSWORD_LENGTH} characters, with an uppercase letter, a lowercase letter, a number and a symbol.`;
+    return `At least ${MIN_PASSWORD_LENGTH} characters, with an uppercase letter, a lowercase letter and a number.`;
   }
   const parts = passwordNeeds(password).map((need) => {
     if (need !== 'length') return NEED_TEXT[need];

@@ -85,6 +85,12 @@ describe('Vault', () => {
     expect(dump.toLowerCase()).not.toContain(DEV_ADDR_0.slice(2).toLowerCase());
   });
 
+  it('takes ten characters with no symbol', async () => {
+    await vault.create(DEV_MNEMONIC, 'Tr0ub4dor3');
+    await vault.lock();
+    expect(await vault.unlock('Tr0ub4dor3')).toHaveLength(1);
+  });
+
   it('rejects weak passwords, bad mnemonics and a second create', async () => {
     await expectCode(vault.create(DEV_MNEMONIC, 'short'), 'weak_password');
     await expectCode(vault.create(DEV_MNEMONIC, 'correct horse battery'), 'weak_password');

@@ -33,7 +33,7 @@ const MESSAGES: Record<ErrorCode, string> = {
   exists: 'A wallet already exists.',
   locked: 'Wallet is locked.',
   bad_password: 'Wrong password.',
-  weak_password: `Password needs at least ${MIN_PASSWORD_LENGTH} characters, with an uppercase letter, a lowercase letter, a number and a symbol.`,
+  weak_password: `Password needs at least ${MIN_PASSWORD_LENGTH} characters, with an uppercase letter, a lowercase letter and a number.`,
   bad_mnemonic: 'That recovery phrase is not valid (12 or 24 English words).',
   bad_private_key: 'That private key is not valid.',
   duplicate: 'This wallet is already in Nesty.',
