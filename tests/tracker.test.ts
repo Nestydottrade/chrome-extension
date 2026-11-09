@@ -400,7 +400,7 @@ describe('wallet tracker', () => {
       code: 'too_many_wallets',
     });
 
-    await w.removeSite(SITE);
+    for (const x of (await w.feed(SITE)).wallets) await w.unfollow(SITE, x.id);
     expect((await w.feed(SITE)).wallets).toEqual([]);
     expect(scheduled).toEqual([true, false]);
   });

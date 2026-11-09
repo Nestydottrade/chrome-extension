@@ -23,7 +23,7 @@ import { txToWire, type EvmTx } from '../src/background/trade/signer';
 import type { SiteEvmCheck } from '../src/background/trade/site-evm';
 import { VaultError, type KeyValueStore } from '../src/background/vault/vault';
 import type { BridgeQuoteView, RequestOf } from '../src/shared/messages';
-import type { TradeTicket } from '../src/shared/panel';
+import type { QuoteSet, TradeTicket } from '../src/shared/panel';
 import type { SiteBridgeRequest, SitePendingView } from '../src/shared/site-bridge';
 import { SOLANA_CHAIN_ID } from '../src/shared/solana';
 
@@ -71,6 +71,8 @@ function setup(
     /** A bridge's value in USD, as its quote says. */
     bridgeUsd: 5 as number | null,
     views: [] as (SitePendingView | null)[],
+    /** A buy's value in USD, as the engine works it out before it asks its gate. */
+    buyUsd: 5,
   };
   const checkSiteTrade = vi.fn(async () => check);
   const checkSiteCreate = vi.fn(async () => check);
@@ -90,6 +92,29 @@ function setup(
     })),
     send: vi.fn(async (req: SiteBridgeRequest) => bridgeTicket(`t-${req.amount}`)),
   };
+  // The extension's engines: each trade they are asked for passes its gate, then is made.
+  let made = 0;
+  type Asked = {
+    gate?: (b: { usd: number; spend: string; coin: string | null }) => Promise<boolean>;
+  };
+  const trade = (kind: 'buy' | 'sell', chainId: number) => async (req: Asked) => {
+    if (req.gate) await req.gate({ usd: state.buyUsd, spend: '0.01 ETH', coin: 'COIN' });
+    return tradeTicket(`${kind}-${++made}`, chainId);
+  };
+  const engine = {
+    buy: vi.fn(trade('buy', 8453)),
+    sell: vi.fn(trade('sell', 8453)),
+    replace: vi.fn(async (id: string) => tradeTicket(id, 8453)),
+  };
+  const sol = {
+    buy: vi.fn(trade('buy', SOLANA_CHAIN_ID)),
+    sell: vi.fn(trade('sell', SOLANA_CHAIN_ID)),
+    panelQuotes: vi.fn(async () => QUOTES),
+    notePagePool: vi.fn(),
+  };
+  const quotes = vi.fn(async () => QUOTES);
+  /** Tab, ticket and its status, as each push went out. */
+  const pushed: [number, string, string][] = [];
   let n = 0;
   const deps: SiteDeps = {
     vault: {
@@ -106,7 +131,10 @@ function setup(
       },
     },
     bridge,
-    solana: { checkSiteTrade, checkSiteCreate },
+    solana: { ...sol, checkSiteTrade, checkSiteCreate } as unknown as SiteDeps['solana'],
+    engine: engine as unknown as SiteDeps['engine'],
+    quotes,
+    pushTicket: (tabId, ticket) => void pushed.push([tabId, ticket.id, ticket.status]),
     evm,
     // No price is ever found: alerts here are only kept, never fired.
     alerts: new AlertWatcher({
@@ -148,8 +176,29 @@ function setup(
     now: () => state.now,
   };
   const site = new SiteService(deps);
-  return { site, state, checkSiteTrade, checkSiteCreate, evm, bridge };
+  return { site, state, checkSiteTrade, checkSiteCreate, evm, bridge, engine, sol, quotes, pushed };
 }
+
+const QUOTES: QuoteSet = {
+  buys: [],
+  sells: [],
+  tokenUsd: null,
+  venue: null,
+  idle: null,
+  tax: null,
+  taxUnknown: false,
+  fetchedAt: 0,
+};
+
+const tradeTicket = (id: string, chainId: number): TradeTicket => ({
+  id,
+  kind: 'buy',
+  chainId,
+  status: 'working',
+  legs: [{ walletId: 'w2', walletName: 'Base', kind: 'swap', status: 'queued' }],
+  createdAt: 0,
+  explorer: 'https://basescan.org',
+});
 
 const bridgeTicket = (id: string): TradeTicket => ({
   id,
@@ -212,7 +261,7 @@ describe('the Nesty website', () => {
     await expect(site.wallets(SITE)).rejects.toEqual(new SiteError('not_connected'));
   });
 
-  it('keeps price alerts for a connected site only, and drops them when it disconnects', async () => {
+  it('keeps price alerts for a connected site only, and keeps them while it is turned off', async () => {
     const { site, state } = setup();
     const alert: RequestOf<'site.alerts.set'> = {
       type: 'site.alerts.set',
@@ -242,11 +291,22 @@ describe('the Nesty website', () => {
     await site.removeAlert(SITE, set.id);
     expect((await site.alerts(SITE)).alerts).toEqual([]);
 
-    await site.setAlert(SITE, alert);
+    const kept = await site.setAlert(SITE, alert);
     await site.disconnect(SITE);
+    await expect(site.alerts(SITE)).rejects.toEqual(new SiteError('not_connected'));
     state.unlocked = true;
     await site.connect(SITE);
-    expect((await site.alerts(SITE)).alerts).toEqual([]);
+    expect((await site.alerts(SITE)).alerts.map((x) => x.id)).toEqual([kept.id]);
+  });
+
+  it('keeps the wallets a site follows while it is turned off', async () => {
+    const { site } = setup();
+    await site.connect(SITE);
+    await site.follow(SITE, { type: 'site.tracker.follow', address: EVM, name: 'Whale' });
+    await site.disconnect(SITE);
+    await expect(site.trackerFeed(SITE)).rejects.toEqual(new SiteError('not_connected'));
+    await site.connect(SITE);
+    expect((await site.trackerFeed(SITE)).wallets.map((w) => w.name)).toEqual(['Whale']);
   });
 
   it('stays out when the user declines, or closes the window', async () => {
@@ -618,5 +678,218 @@ describe('the Nesty website', () => {
       relayStatus: 'success',
       payout: 'payout-signature',
     });
+  });
+});
+
+describe("the Nesty website's trades", () => {
+  const PREFS = {
+    chain: { slippageBps: 2000, priority: 'high' as const },
+    global: { jitterMaxMs: 50 },
+  };
+  const buy = (): RequestOf<'site.trade.buy'> => ({
+    type: 'site.trade.buy',
+    chainId: 8453,
+    token: TOKEN,
+    amount: '0.01',
+    walletIds: ['w2'],
+    mode: 'each',
+    clickedAt: 999_000,
+    prefs: PREFS,
+  });
+  const sell = (): RequestOf<'site.trade.sell'> => ({
+    type: 'site.trade.sell',
+    chainId: 8453,
+    token: TOKEN,
+    bps: 5000,
+    walletIds: ['w2'],
+    prefs: PREFS,
+  });
+
+  it('are made by the extension with the site’s settings, for a site that is in and unlocked', async () => {
+    const { site, state, engine } = setup();
+    expect((await site.hello(SITE)).trades).toBe(true);
+    await expect(site.buy(SITE, buy(), 7)).rejects.toEqual(new SiteError('not_connected'));
+    await site.connect(SITE);
+    state.unlocked = false;
+    await expect(site.buy(SITE, buy(), 7)).rejects.toEqual(new VaultError('locked'));
+    await expect(site.sell(SITE, sell(), 7)).rejects.toEqual(new VaultError('locked'));
+    state.unlocked = true;
+    const t = await site.buy(SITE, buy(), 7);
+    expect(t.id).toBe('buy-1');
+    expect(engine.buy).toHaveBeenCalledWith(
+      {
+        chainId: 8453,
+        token: TOKEN,
+        amount: '0.01',
+        walletIds: ['w2'],
+        mode: 'each',
+        confirmed: false,
+        clickedAt: 999_000,
+        prefs: PREFS,
+        gate: expect.any(Function),
+      },
+      7,
+    );
+    // Only the connection was ever put to the user.
+    expect(state.opened).toBe(1);
+  });
+
+  it('wait for the user above the confirmation amount, as the buys it signs do', async () => {
+    const { site, state } = setup();
+    await site.connect(SITE);
+    state.buyUsd = 30;
+    state.answer = false;
+    await expect(site.buy(SITE, buy())).rejects.toEqual(new SiteError('rejected'));
+    state.answer = true;
+    await expect(site.buy(SITE, buy())).resolves.toHaveProperty('id');
+    expect(state.opened).toBe(3);
+    expect(state.views.at(-1)).toMatchObject({
+      kind: 'trade',
+      origin: SITE,
+      walletName: 'Base',
+      summary: 'Buy COIN for 0.01 ETH on Base',
+      usd: 30,
+    });
+  });
+
+  it('ask once buys pass the minute budget, and never for sells', async () => {
+    const { site, state, engine } = setup();
+    await site.connect(SITE);
+    state.buyUsd = 15;
+    // $15 each, $50 a minute (the defaults): the fourth would make $60.
+    for (let i = 0; i < 3; i++) await site.buy(SITE, buy());
+    expect(state.opened).toBe(1);
+    state.answer = false;
+    await expect(site.buy(SITE, buy())).rejects.toEqual(new SiteError('rejected'));
+    expect(state.opened).toBe(2);
+    await site.sell(SITE, sell());
+    expect(state.opened).toBe(2);
+    expect(engine.sell).toHaveBeenCalledWith(
+      {
+        chainId: 8453,
+        token: TOKEN,
+        bps: 5000,
+        walletIds: ['w2'],
+        confirmed: true,
+        clickedAt: undefined,
+        prefs: PREFS,
+      },
+      undefined,
+    );
+    // A minute later the budget is back.
+    state.now += 61_000;
+    await site.buy(SITE, buy());
+    expect(state.opened).toBe(2);
+  });
+
+  it("tell the asking site's tab alone how its trades go, and replace only its own", async () => {
+    const { site, engine, pushed } = setup();
+    await site.connect(SITE);
+    await site.connect(OTHER);
+    const t = await site.buy(SITE, buy(), 7);
+    site.noteTicket({ ...t, status: 'done' });
+    site.noteTicket(tradeTicket('not-the-site', 8453));
+    expect(pushed).toEqual([[7, t.id, 'done']]);
+
+    const replace = (mode: 'speedUp' | 'cancel'): RequestOf<'site.trade.replace'> => ({
+      type: 'site.trade.replace',
+      ticketId: t.id,
+      walletId: 'w2',
+      mode,
+    });
+    await expect(site.replace(OTHER, replace('speedUp'))).rejects.toMatchObject({
+      code: 'not_found',
+    });
+    await site.replace(SITE, replace('cancel'));
+    expect(engine.replace).toHaveBeenCalledWith(t.id, 'w2', 'cancel');
+
+    // Turned off, it hears no more of them.
+    await site.disconnect(SITE);
+    site.noteTicket(t);
+    expect(pushed).toHaveLength(1);
+  });
+
+  it("quote for the site's wallets, and buy on Solana on a pool the page named", async () => {
+    const { site, quotes, sol } = setup();
+    const ask: RequestOf<'site.trade.quotes'> = {
+      type: 'site.trade.quotes',
+      chainId: 8453,
+      token: TOKEN,
+      buyAmounts: ['0.01'],
+      sellBps: [5000],
+      walletIds: ['w2'],
+    };
+    await expect(site.quotes(SITE, ask)).rejects.toEqual(new SiteError('not_connected'));
+    await site.connect(SITE);
+    await site.quotes(SITE, ask);
+    expect(quotes).toHaveBeenCalledWith({
+      chainId: 8453,
+      token: TOKEN,
+      buyAmounts: ['0.01'],
+      sellBps: [5000],
+      walletIds: ['w2'],
+    });
+
+    const prefs = { solana: { slippageBps: 1500 } };
+    await site.solBuy(
+      SITE,
+      {
+        type: 'site.sol.buy',
+        mint: WALLET,
+        amount: '0.1',
+        walletIds: ['w1'],
+        mode: 'split',
+        prefs,
+        pool: STRANGER,
+      },
+      7,
+    );
+    expect(sol.notePagePool).toHaveBeenCalledWith(WALLET, STRANGER);
+    expect(sol.buy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        mint: WALLET,
+        amount: '0.1',
+        mode: 'split',
+        confirmed: false,
+        prefs,
+      }),
+      7,
+    );
+    await site.solSell(SITE, {
+      type: 'site.sol.sell',
+      mint: WALLET,
+      bps: 10_000,
+      walletIds: ['w1'],
+      prefs,
+    });
+    expect(sol.sell).toHaveBeenCalledWith(
+      expect.objectContaining({ mint: WALLET, bps: 10_000, confirmed: true, prefs }),
+      undefined,
+    );
+    sol.notePagePool.mockClear();
+    await site.solQuotes(SITE, {
+      type: 'site.sol.quotes',
+      mint: WALLET,
+      buyAmounts: ['0.1'],
+      sellBps: [],
+      walletIds: ['w1'],
+    });
+    expect(sol.panelQuotes).toHaveBeenCalledWith({
+      mint: WALLET,
+      buyAmounts: ['0.1'],
+      sellBps: [],
+      walletIds: ['w1'],
+    });
+    expect(sol.notePagePool).not.toHaveBeenCalled();
+    // A quick buy's new curve is noted before it is quoted, as for the buy itself.
+    await site.solQuotes(SITE, {
+      type: 'site.sol.quotes',
+      mint: WALLET,
+      buyAmounts: ['0.1'],
+      sellBps: [],
+      walletIds: ['w1'],
+      pool: STRANGER,
+    });
+    expect(sol.notePagePool).toHaveBeenCalledWith(WALLET, STRANGER);
   });
 });

@@ -1,16 +1,19 @@
 import type { AlertInput, AlertView } from './alerts';
-import type { BlockedAction } from './panel';
+import type { BlockedAction, TradeTicket } from './panel';
+import type { TradePrefs } from './settings/defaults';
 import type { FollowEdit, FollowInput, TrackerView } from './tracker';
 import type { SolAddress } from './solana';
 
 /**
  * How the Nesty website talks to the extension: window messages, which the extension's
- * content script on that site (and nowhere else) carries to the background. The site
- * builds every trade itself, Solana and EVM; the extension keeps the keys, checks each
- * transaction again (route, limits, validator) and returns only a signature. Bridges are
- * the exception: the extension quotes, signs and sends them itself, so the address paid is
- * the one the user saw. These are the messages' shapes: the background parses every request
- * again (RequestSchema).
+ * content script on that site (and nowhere else) carries to the background. Its buys and
+ * sells, Solana and EVM, are the extension's own: the site says what to trade, with which
+ * wallets and its own trade settings, and the extension quotes, checks, signs and sends
+ * them as its panel does, keeps them in its history, and tells the page how each goes.
+ * So are bridges, so the address paid is the one the user saw. What the site still builds
+ * itself (new coins, and every trade of an extension older than these), the extension
+ * builds again and checks before it returns only a signature. These are the messages'
+ * shapes: the background parses every request again (RequestSchema).
  */
 
 /** Page → extension. */
@@ -22,14 +25,21 @@ export const EXTENSION_SOURCE = 'nesty-extension';
  * What the site may ask for: nothing that reads a key, and no funds moved but a trade, a new
  * coin or a bridge (to an outside address only once the user approves it in the extension).
  * It may also keep price alerts in the extension, which reads the prices and notifies, and
- * follow wallets there, whose trades the extension reads and notifies.
+ * follow wallets there, whose trades the extension reads and notifies. Only the user turns
+ * it off, in the extension's popup: no site disconnects itself.
  */
 export const SITE_METHODS = {
   hello: 'site.hello',
   connect: 'site.connect',
-  disconnect: 'site.disconnect',
   wallets: 'site.wallets',
   unlock: 'site.unlock',
+  buy: 'site.trade.buy',
+  sell: 'site.trade.sell',
+  quotes: 'site.trade.quotes',
+  replace: 'site.trade.replace',
+  solBuy: 'site.sol.buy',
+  solSell: 'site.sol.sell',
+  solQuotes: 'site.sol.quotes',
   signSolana: 'site.sol.sign',
   signEvm: 'site.evm.sign',
   signEvmPermit: 'site.evm.permit',
@@ -61,11 +71,15 @@ export type SitePageResponse = { source: typeof EXTENSION_SOURCE; id: string } &
 
 /**
  * Unprompted: the extension is there (on load, and in answer to a hello), the vault locked
- * or unlocked, or Nesty was updated since the page loaded ("gone": only a reload reaches it
- * again; every request is answered "reloaded" until then).
+ * or unlocked, a trade the site asked for moved on ("ticket": its whole state), or Nesty was
+ * updated since the page loaded ("gone": only a reload reaches it again; every request is
+ * answered "reloaded" until then).
  */
 export type SitePageEvent = { source: typeof EXTENSION_SOURCE } & (
-  { event: 'ready' } | { event: 'vault'; unlocked: boolean } | { event: 'gone' }
+  | { event: 'ready' }
+  | { event: 'vault'; unlocked: boolean }
+  | { event: 'ticket'; ticket: TradeTicket }
+  | { event: 'gone' }
 );
 
 /** The user's limits, which every trade the site asks to sign is held to. */
@@ -84,9 +98,85 @@ export interface SiteHello {
   /** A wallet exists (set up in the extension). */
   exists: boolean;
   unlocked: boolean;
-  /** The user let this site see their wallets and ask for signatures. */
+  /** The user let this site see their wallets and ask for trades and signatures. */
   connected: boolean;
   limits: SiteLimits;
+  /**
+   * The extension makes the site's buys and sells itself (buy, sell, quotes, replace and
+   * their Solana forms). Absent from older versions, which only sign what the site built.
+   */
+  trades?: boolean;
+}
+
+/** A buy the site asks for: the extension finds the route, checks, signs and sends it. */
+export interface SiteBuyRequest {
+  chainId: number;
+  token: string;
+  /** Decimal, in the chain's native coin. */
+  amount: string;
+  walletIds: string[];
+  /** The amount in each wallet, or split between them. */
+  mode: 'each' | 'split';
+  /** When the user clicked, for the click to sent timing. */
+  clickedAt?: number | undefined;
+  /** The site's own trade settings, which this trade runs with. */
+  prefs: TradePrefs;
+}
+
+export interface SiteSellRequest {
+  chainId: number;
+  token: string;
+  /** Of each wallet's holding, in basis points. */
+  bps: number;
+  walletIds: string[];
+  clickedAt?: number | undefined;
+  prefs: TradePrefs;
+}
+
+/** Quotes for the site's panel, from the extension: they keep its routes and fees ready. */
+export interface SiteQuotesRequest {
+  chainId: number;
+  token: string;
+  buyAmounts: string[];
+  sellBps: number[];
+  /** The wallets that trade: sells are quoted for what they hold. */
+  walletIds: string[];
+}
+
+/** A Solana buy: `amount` in what the coin is bought with (SOL, or its quote token). */
+export interface SiteSolBuyRequest {
+  mint: SolAddress;
+  amount: string;
+  walletIds: string[];
+  mode: 'each' | 'split';
+  clickedAt?: number | undefined;
+  prefs: TradePrefs;
+  /** A pool the coin trades on that the pool index may not list yet (a new curve). */
+  pool?: SolAddress | undefined;
+}
+
+export interface SiteSolSellRequest {
+  mint: SolAddress;
+  bps: number;
+  walletIds: string[];
+  clickedAt?: number | undefined;
+  prefs: TradePrefs;
+}
+
+export interface SiteSolQuotesRequest {
+  mint: SolAddress;
+  buyAmounts: string[];
+  sellBps: number[];
+  walletIds: string[];
+  /** A pool the coin trades on that the pool index may not list yet (a new curve). */
+  pool?: SolAddress | undefined;
+}
+
+/** Speeds up or cancels a wallet's transaction, in a trade the site asked for, still waiting. */
+export interface SiteReplaceRequest {
+  ticketId: string;
+  walletId: string;
+  mode: 'speedUp' | 'cancel';
 }
 
 export interface SiteWallet {

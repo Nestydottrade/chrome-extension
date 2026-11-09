@@ -242,15 +242,6 @@ describe('price alerts', () => {
     expect(alertPage(`alert|a1|${BASE}|${TOKEN_LC}|${SITE}|extra`)).toBeNull();
   });
 
-  it('drops a site’s alerts when it is disconnected, and only its own', async () => {
-    const { w } = setup();
-    await w.add(SITE, onBase());
-    const kept = await w.add(OTHER, onBase());
-    await w.removeSite(SITE);
-    expect(await w.list(SITE)).toEqual([]);
-    expect((await w.list(OTHER)).map((a) => a.id)).toEqual([kept.id]);
-  });
-
   it('reads prices only from pairs that hold together', () => {
     const found = pricesFromFeed(
       BASE,

@@ -114,15 +114,25 @@ export async function panelState(
 
 const decimalsCache = new Map<string, number>();
 
-/** Quotes for the quick amounts, with price impact, the token's USD price and its tax. */
+/**
+ * Quotes for the quick amounts, with price impact, the token's USD price and its tax.
+ * `walletIds`: the wallets that trade (the website's own choice), else the selected ones.
+ */
 export async function panelQuotes(
   d: PanelDeps,
-  req: { chainId: number; token: Address; buyAmounts: string[]; sellBps: number[] },
+  req: {
+    chainId: number;
+    token: Address;
+    buyAmounts: string[];
+    sellBps: number[];
+    walletIds?: readonly string[] | undefined;
+  },
 ): Promise<QuoteSet> {
   const { ctx } = await chainContext(d, req.chainId);
+  const tradingIds = async () => req.walletIds ?? (await selectedIds(d));
   // Keep fee and nonce caches warm while the panel is open (not awaited).
   if (await d.vault.isUnlocked()) {
-    void selectedIds(d)
+    void tradingIds()
       .then((ids) => d.engine.warm(req.chainId, ids))
       .catch(() => undefined);
   }
@@ -137,7 +147,7 @@ export async function panelQuotes(
   let held = 0n;
   if (req.sellBps.length > 0 && (await d.vault.isUnlocked())) {
     const accounts = (await d.vault.listAccounts()).filter(hasEvm);
-    const ids = new Set(await selectedIds(d));
+    const ids = new Set(await tradingIds());
     const addrs = accounts.filter((a) => ids.has(a.id)).map((a) => a.address);
     held = (await readBalances(ctx.client, req.token, addrs)).reduce((s, b) => s + b.token, 0n);
   }

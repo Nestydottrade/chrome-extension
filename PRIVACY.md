@@ -45,10 +45,10 @@ directly from your browser. Each sees your IP address and what it is asked for:
 - **Trading sites** where the panel runs: Nesty reads the page's address to find its token,
   and sends the site nothing.
 - **The Nesty website** (nesty.trade), while the extension is connected to it (from the
-  start, until you disconnect it), sees your wallets' names and public addresses, the
-  trades, new coins, bridges and price alerts you
-  make there, and the wallets you follow there with their trades. It never sees a key: the
-  extension checks and signs each transaction itself. The site's own privacy policy is at
+  start, until you turn it off in the extension's popup), sees your wallets' names and
+  public addresses, the trades, new coins, bridges and price alerts you make there, and
+  the wallets you follow there with their trades. It never sees a key: the extension makes
+  its trades, and checks and signs each transaction, itself. The site's own privacy policy is at
   https://nesty.trade/#/privacy.
 - **X**, when you choose Post on X on a profit card, opens with the post's first words (the
   gain and the token) filled in. Nothing is posted until you post it.

@@ -171,11 +171,6 @@ export class AlertWatcher {
     await this.write((list) => list.filter((a) => !(a.id === id && a.origin === origin)));
   }
 
-  /** Every alert a site set: when it is disconnected. */
-  async removeSite(origin: string): Promise<void> {
-    await this.write((list) => list.filter((a) => a.origin !== origin));
-  }
-
   /** Reads the prices and fires the alerts they reach. Asked for during a check, another follows it. */
   check(): Promise<void> {
     if (this.checking) {

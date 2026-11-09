@@ -29,11 +29,14 @@ export default defineContentScript({
       relay(e.data);
     });
 
-    // Only the vault's lock state reaches the page; tickets and blocks stay in the extension.
+    // The vault's lock state, and the trades this site asked for (the background sends those
+    // to its tab alone); nothing else the extension does reaches the page.
     browser.runtime.onMessage.addListener((msg: unknown) => {
       const ev = msg as PushEvent | undefined;
       if (ev?.kind === 'nesty.vault')
         post({ source: EXTENSION_SOURCE, event: 'vault', unlocked: ev.unlocked });
+      else if (ev?.kind === 'nesty.site.ticket')
+        post({ source: EXTENSION_SOURCE, event: 'ticket', ticket: ev.ticket });
     });
 
     // Page scripts start after this one: they can listen for this, or ask with a hello.

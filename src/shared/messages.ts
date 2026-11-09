@@ -15,6 +15,7 @@ import {
   PanelChainPatchSchema,
   PanelSolanaPatchSchema,
   SolanaSettingsSchema,
+  TradePrefsSchema,
 } from './settings/defaults';
 import type {
   SiteAlert,
@@ -658,9 +659,79 @@ export const RequestSchema = z.discriminatedUnion('type', [
   // The Nesty website (SITE_TYPES): connecting, its wallet list, signing its trades.
   z.object({ type: z.literal('site.hello') }).strict(),
   z.object({ type: z.literal('site.connect') }).strict(),
-  z.object({ type: z.literal('site.disconnect') }).strict(),
   z.object({ type: z.literal('site.wallets') }).strict(),
   z.object({ type: z.literal('site.unlock') }).strict(),
+  // Its buys and sells, made by the extension's own engine with the site's trade settings.
+  z
+    .object({
+      type: z.literal('site.trade.buy'),
+      ...TradeTarget,
+      amount: Decimal,
+      walletIds: WalletIds,
+      mode: z.enum(['each', 'split']),
+      clickedAt: ClickedAt,
+      prefs: TradePrefsSchema,
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal('site.trade.sell'),
+      ...TradeTarget,
+      bps: z.number().int().min(1).max(10_000),
+      walletIds: WalletIds,
+      clickedAt: ClickedAt,
+      prefs: TradePrefsSchema,
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal('site.trade.quotes'),
+      ...TradeTarget,
+      buyAmounts: z.array(Decimal).max(8),
+      sellBps: z.array(z.number().int().min(1).max(10_000)).max(8),
+      walletIds: WalletIds,
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal('site.trade.replace'),
+      ticketId: Id,
+      walletId: Id,
+      mode: z.enum(['speedUp', 'cancel']),
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal('site.sol.buy'),
+      mint: SolAddressSchema,
+      amount: SolDecimal,
+      walletIds: WalletIds,
+      mode: z.enum(['each', 'split']),
+      clickedAt: ClickedAt,
+      prefs: TradePrefsSchema,
+      pool: SolAddressSchema.optional(),
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal('site.sol.sell'),
+      mint: SolAddressSchema,
+      bps: z.number().int().min(1).max(10_000),
+      walletIds: WalletIds,
+      clickedAt: ClickedAt,
+      prefs: TradePrefsSchema,
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal('site.sol.quotes'),
+      mint: SolAddressSchema,
+      buyAmounts: z.array(SolDecimal).max(8),
+      sellBps: z.array(z.number().int().min(1).max(10_000)).max(8),
+      walletIds: WalletIds,
+      pool: SolAddressSchema.optional(),
+    })
+    .strict(),
   z
     .object({
       type: z.literal('site.sol.sign'),
@@ -778,9 +849,15 @@ export const CONTENT_TYPES: ReadonlySet<RequestType> = new Set<RequestType>([
 export const SITE_TYPES: ReadonlySet<RequestType> = new Set<RequestType>([
   'site.hello',
   'site.connect',
-  'site.disconnect',
   'site.wallets',
   'site.unlock',
+  'site.trade.buy',
+  'site.trade.sell',
+  'site.trade.quotes',
+  'site.trade.replace',
+  'site.sol.buy',
+  'site.sol.sell',
+  'site.sol.quotes',
   'site.sol.sign',
   'site.evm.sign',
   'site.evm.permit',
@@ -1014,9 +1091,15 @@ export interface ResponseMap {
   'sol.settings.update': SolanaSettings;
   'site.hello': SiteHello;
   'site.connect': SiteWallet[];
-  'site.disconnect': null;
   'site.wallets': SiteWallet[];
   'site.unlock': null;
+  'site.trade.buy': TradeTicket;
+  'site.trade.sell': TradeTicket;
+  'site.trade.quotes': QuoteSet;
+  'site.trade.replace': TradeTicket;
+  'site.sol.buy': TradeTicket;
+  'site.sol.sell': TradeTicket;
+  'site.sol.quotes': QuoteSet;
   'site.sol.sign': SiteSolSigned;
   'site.evm.sign': SiteEvmSigned;
   'site.evm.permit': SiteEvmSigned;
@@ -1102,4 +1185,6 @@ export const ResultEnvelopeSchema = z.union([
 export type PushEvent =
   | { kind: 'nesty.vault'; unlocked: boolean }
   | { kind: 'nesty.ticket'; ticket: TradeTicket }
+  /** To the Nesty website's tab only: a trade it asked for moved on. */
+  | { kind: 'nesty.site.ticket'; ticket: TradeTicket }
   | { kind: 'nesty.block'; chainId: number };

@@ -3,7 +3,14 @@ import { EngineCore, type EngineDeps } from './core';
 import { TradingFlow } from './trading';
 import { TransferFlow } from './transfers';
 
-export { TradeError, chainContext, gasFeeRefusal, shortErr, type EngineDeps } from './core';
+export {
+  TradeError,
+  chainContext,
+  gasFeeRefusal,
+  shortErr,
+  type BuyGate,
+  type EngineDeps,
+} from './core';
 export { approvalTarget, minOutAfter } from './trading';
 
 /**

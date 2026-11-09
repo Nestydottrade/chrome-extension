@@ -371,20 +371,6 @@ export class TrackerWatcher {
     return this.view(origin);
   }
 
-  /** Every wallet a site follows: when it is disconnected. */
-  async removeSite(origin: string): Promise<void> {
-    await this.enqueue(async () => {
-      const before = await this.wallets();
-      const next = before.filter((w) => w.origin !== origin);
-      if (next.length !== before.length) await this.saveWallets(before, next);
-      const st = await this.state();
-      if (origin in st.minUsd) {
-        const minUsd = Object.fromEntries(Object.entries(st.minUsd).filter(([o]) => o !== origin));
-        await this.saveState({ ...st, minUsd });
-      }
-    });
-  }
-
   /** Reads the wallets and notifies their new trades. Asked for during a check, another follows it. */
   check(): Promise<void> {
     if (this.checking) {

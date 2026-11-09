@@ -1,5 +1,5 @@
 import { base58 } from '@scure/base';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { SettingsStore } from '../src/background/settings';
 import {
   SYSTEM_PROGRAM,
@@ -351,6 +351,49 @@ describe('Solana coins priced in a token, bought and sold with SOL', () => {
     expect(amounts(signed[1])?.minOut).toBe(
       ((bestRoute([coinPool], 'buy', usdcIn)?.out ?? 0n) * 9_000n) / 10_000n,
     );
+  });
+
+  it("buys with a website's own slippage, once its gate let the buy through", async () => {
+    const usdcIn = 14_900_000n;
+    const { svc, signed, settled } = await setup({ usdc: usdcIn }, [
+      landed(USDC_MINT, usdcIn, -SOL / 10n),
+      landed(COIN, 1_480_000_000n),
+    ]);
+    const gate = vi.fn(async () => false);
+    const start = await svc.buy({
+      mint: COIN,
+      amount: '0.1',
+      walletIds: ['a'],
+      mode: 'each',
+      confirmed: false,
+      prefs: { solana: { slippageBps: 2000 } },
+      gate,
+    });
+    expect(gate).toHaveBeenCalledWith(
+      expect.objectContaining({ spend: '0.1 SOL', usd: expect.any(Number) }),
+    );
+    expect((await settled(start.id)).status).toBe('done');
+    const minOut = signed[1]?.instructions
+      .map((ix) => dexModule(coinPool).amounts(ix.data))
+      .find((a) => a !== null && a !== undefined)?.minOut;
+    expect(minOut).toBe(((bestRoute([coinPool], 'buy', usdcIn)?.out ?? 0n) * 8_000n) / 10_000n);
+  });
+
+  it('makes no buy its gate refused', async () => {
+    const { svc, signed } = await setup({}, []);
+    await expect(
+      svc.buy({
+        mint: COIN,
+        amount: '0.1',
+        walletIds: ['a'],
+        mode: 'each',
+        confirmed: false,
+        gate: async () => {
+          throw new Error('rejected');
+        },
+      }),
+    ).rejects.toThrow('rejected');
+    expect(signed).toHaveLength(0);
   });
 
   it('stops the buy when SOL does not become the token', async () => {

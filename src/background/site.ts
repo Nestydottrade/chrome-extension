@@ -4,7 +4,7 @@ import { privateKeyToAccount } from 'viem/accounts';
 import { formatCompact } from '../shared/format';
 import type { BridgeQuoteView, RequestOf } from '../shared/messages';
 import { nativeSymbol, networkName } from '../shared/networks';
-import type { TradeTicket } from '../shared/panel';
+import type { QuoteSet, TradeTicket } from '../shared/panel';
 import type { GlobalSettings } from '../shared/settings/defaults';
 import type {
   SiteAlert,
@@ -22,16 +22,16 @@ import type {
   SolTradeIntent,
   WireInstruction,
 } from '../shared/site-bridge';
-import { nativeDecimals } from '../shared/solana';
+import { SOLANA_CHAIN_ID, nativeDecimals } from '../shared/solana';
 import { hasEvm, type EvmAccount, type WalletAccount } from '../shared/wallet';
 import type { AlertWatcher } from './alerts';
 import type { SettingsStore } from './settings';
 import type { TrackerWatcher } from './tracker';
 import { publicKeyOf, signMessage } from './solana/keys';
-import type { SiteTradeCheck } from './solana/service';
+import type { SiteTradeCheck, SolanaService } from './solana/service';
 import { compileMessage, serializeTransaction, type Instruction } from './solana/tx';
 import { bridgeDestination } from './trade/bridge-to';
-import { TradeError } from './trade/engine';
+import { TradeError, type BuyGate, type TradeEngine } from './trade/engine';
 import {
   permitPurposeFromWire,
   purposeFromWire,
@@ -43,19 +43,21 @@ import type { SiteEvmCheck, SiteEvmChecker } from './trade/site-evm';
 import { VaultError, type KeyValueStore, type Vault } from './vault/vault';
 
 /**
- * The Nesty website's side of the extension. There the extension keeps the keys and
- * nothing else: the site finds coins, quotes, builds and sends its transactions itself.
- * The hosted site is in from the start; any other (the development server) gets in once
- * the user approves it in a window, as does the hosted site after the user disconnects it.
- * Once in, it may list the wallets and ask for signatures on trades, Solana and EVM (with
- * the approvals and Permit2 messages EVM sells need), and on new coins. Each is checked
- * again here as the panel's trades are (built again from chain, the user's limits, the
- * validator); buys above the confirmation amount, or past a minute's budget, wait for the
- * user, and every new coin does. It may also ask for a bridge, which the extension quotes
- * and sends itself: to the user's own wallet like a buy, and to an outside address only
- * once the user approves it here (with the password above the confirmation amount, as a
- * Send). And it may keep price alerts and followed wallets here, which the extension
- * checks and notifies of; they go when the site is disconnected.
+ * The Nesty website's side of the extension. The hosted site is in from the start; any
+ * other (the development server) gets in once the user approves it in a window, as does the
+ * hosted site after the user turns it off in the popup. Once in, it may list the wallets
+ * and ask for buys and sells, Solana and EVM, which the extension makes with its own engine
+ * as the panel's are (its routes and checks, the user's limits and the validator), with the
+ * site's own trade settings, keeping them in its history and telling the site's tab how
+ * each goes. Buys above the confirmation amount, or past a minute's budget, wait for the
+ * user. It may also ask for signatures on new coins, which are always the user's call, and
+ * on the trades an older site builds itself (with the approvals and Permit2 messages EVM
+ * sells need), each built again here from chain and checked the same way. It may ask for a
+ * bridge, which the extension quotes and sends itself: to the user's own wallet like a buy,
+ * and to an outside address only once the user approves it here (with the password above
+ * the confirmation amount, as a Send). And it may keep price alerts and followed wallets
+ * here, which the extension checks and notifies of; they stay when the site is turned off,
+ * and it sees them again once it is back in.
  * Nothing else is ever signed for it: no transfers, no messages, and no key leaves.
  */
 export interface SiteDeps {
@@ -70,7 +72,8 @@ export interface SiteDeps {
       req: SiteBridgeRequest & { confirmed: true; passwordChecked: boolean },
     ): Promise<TradeTicket>;
   };
-  solana: {
+  /** Solana: the site's trades, made here, and the checks of what it builds itself. */
+  solana: Pick<SolanaService, 'buy' | 'sell' | 'panelQuotes' | 'notePagePool'> & {
     checkSiteTrade(
       wallet: string,
       ixs: readonly Instruction[],
@@ -82,20 +85,29 @@ export interface SiteDeps {
       intent: SolCreateIntent,
     ): Promise<SiteTradeCheck>;
   };
+  /** EVM: the site's trades, made by the extension's engine. */
+  engine: Pick<TradeEngine, 'buy' | 'sell' | 'replace'>;
+  /** The panel's quotes (panel.ts), for the site's wallets: they keep routes and fees warm. */
+  quotes: (req: {
+    chainId: number;
+    token: EvmAccount['address'];
+    buyAmounts: string[];
+    sellBps: number[];
+    walletIds: readonly string[];
+  }) => Promise<QuoteSet>;
+  /** Tells a tab how a trade its site asked for goes. */
+  pushTicket: (tabId: number, ticket: TradeTicket) => void;
   /** EVM transactions and Permit2 messages, built again from their purpose (site-evm.ts). */
   evm: Pick<SiteEvmChecker, 'checkTx' | 'checkPermit' | 'noteSigned'>;
   /** The price alerts sites set (alerts.ts). */
-  alerts: Pick<AlertWatcher, 'list' | 'add' | 'remove' | 'removeSite' | 'blocked'>;
+  alerts: Pick<AlertWatcher, 'list' | 'add' | 'remove' | 'blocked'>;
   /** The wallets sites follow (tracker.ts). */
-  tracker: Pick<
-    TrackerWatcher,
-    'feed' | 'follow' | 'unfollow' | 'edit' | 'setMinUsd' | 'removeSite'
-  >;
+  tracker: Pick<TrackerWatcher, 'feed' | 'follow' | 'unfollow' | 'edit' | 'setMinUsd'>;
   settings: Pick<SettingsStore, 'get'>;
   local: KeyValueStore;
   /**
    * In from the start, with no approval: the hosted site, which every build trusts by name.
-   * Once the user disconnects it, it waits for an approval like any other.
+   * Once the user turns it off, it waits for an approval like any other.
    */
   connectedByDefault: readonly string[];
   /** Opens the approval window for a pending request: its window id. */
@@ -121,6 +133,8 @@ const DISCONNECTED_KEY = 'site.disconnected';
 const APPROVAL_TIMEOUT_MS = 120_000;
 /** Bridges a site started that it can still follow. */
 const BRIDGES_KEPT = 20;
+/** Trades a site asked for that it can still follow and replace. */
+const TRADES_KEPT = 40;
 /** The window buys are added up over, against maxUsdPerClick. */
 const BUDGET_WINDOW_MS = 60_000;
 
@@ -144,6 +158,8 @@ export class SiteService {
   private readonly spent = new Map<string, { at: number; usd: number }[]>();
   /** Bridges sites started, by ticket id: their latest state, for each site to follow its own. */
   private readonly bridges = new Map<string, { origin: string; ticket: TradeTicket }>();
+  /** Buys and sells sites asked for, by ticket id: whose, and the tab told of their news. */
+  private readonly trades = new Map<string, { origin: string; tabId: number | undefined }>();
   private unlockWindow: number | undefined;
 
   constructor(private readonly d: SiteDeps) {}
@@ -155,7 +171,14 @@ export class SiteService {
       this.isConnected(origin),
       this.d.settings.get(),
     ]);
-    return { version: this.d.version, exists, unlocked, connected, limits: limitsOf(gs) };
+    return {
+      version: this.d.version,
+      exists,
+      unlocked,
+      connected,
+      limits: limitsOf(gs),
+      trades: true,
+    };
   }
 
   /** Lets the site in, by the user's approval unless it is in already, then lists the wallets. */
@@ -181,6 +204,10 @@ export class SiteService {
     return this.walletList();
   }
 
+  /**
+   * Turns a site off (the popup's Sites card: no site turns itself off). Its price alerts
+   * and followed wallets stay, and keep notifying: once back in, it sees them again.
+   */
   async disconnect(origin: string): Promise<void> {
     const list = await this.connectionList();
     await this.d.local.set(
@@ -191,8 +218,7 @@ export class SiteService {
     if (this.d.connectedByDefault.includes(origin) && !off.includes(origin))
       await this.d.local.set(DISCONNECTED_KEY, [...off, origin]);
     this.spent.delete(origin);
-    await this.d.alerts.removeSite(origin);
-    await this.d.tracker.removeSite(origin);
+    for (const [id, t] of this.trades) if (t.origin === origin) this.trades.delete(id);
   }
 
   async wallets(origin: string): Promise<SiteWallet[]> {
@@ -258,6 +284,164 @@ export class SiteService {
   async unlock(): Promise<void> {
     if (this.unlockWindow !== undefined || (await this.d.vault.isUnlocked())) return;
     this.unlockWindow = await this.d.openUnlock();
+  }
+
+  /**
+   * A buy the site asked for, made by the extension's engine as the panel's are: its warm
+   * routes, checks and limits, with the site's own trade settings, and kept in the
+   * extension's history. Above the confirmation amount, or past the minute's budget, it
+   * waits for the user in the approval window first.
+   */
+  async buy(
+    origin: string,
+    req: RequestOf<'site.trade.buy'>,
+    tabId?: number,
+  ): Promise<TradeTicket> {
+    await this.requireTrading(origin);
+    const ticket = await this.d.engine.buy(
+      {
+        chainId: req.chainId,
+        token: req.token,
+        amount: req.amount,
+        walletIds: req.walletIds,
+        mode: req.mode,
+        confirmed: false,
+        clickedAt: req.clickedAt,
+        prefs: req.prefs,
+        gate: this.gate(origin, req.chainId, req.walletIds),
+      },
+      tabId,
+    );
+    return this.own(origin, ticket, tabId);
+  }
+
+  /** A sell the site asked for. Sells pay the user's own wallets: none waits for them. */
+  async sell(
+    origin: string,
+    req: RequestOf<'site.trade.sell'>,
+    tabId?: number,
+  ): Promise<TradeTicket> {
+    await this.requireTrading(origin);
+    const ticket = await this.d.engine.sell(
+      {
+        chainId: req.chainId,
+        token: req.token,
+        bps: req.bps,
+        walletIds: req.walletIds,
+        confirmed: true,
+        clickedAt: req.clickedAt,
+        prefs: req.prefs,
+      },
+      tabId,
+    );
+    return this.own(origin, ticket, tabId);
+  }
+
+  /** The site panel's quotes, for its wallets: asked for again every second or two. */
+  async quotes(origin: string, req: RequestOf<'site.trade.quotes'>): Promise<QuoteSet> {
+    await this.requireConnected(origin);
+    return this.d.quotes({
+      chainId: req.chainId,
+      token: req.token,
+      buyAmounts: req.buyAmounts,
+      sellBps: req.sellBps,
+      walletIds: req.walletIds,
+    });
+  }
+
+  /** Speeds up or cancels a wallet's transaction still waiting, in a trade the site asked for. */
+  async replace(origin: string, req: RequestOf<'site.trade.replace'>): Promise<TradeTicket> {
+    await this.requireTrading(origin);
+    if (this.trades.get(req.ticketId)?.origin !== origin) throw new TradeError('not_found');
+    return this.d.engine.replace(req.ticketId, req.walletId, req.mode);
+  }
+
+  /** A Solana buy the site asked for, as `buy` is. */
+  async solBuy(
+    origin: string,
+    req: RequestOf<'site.sol.buy'>,
+    tabId?: number,
+  ): Promise<TradeTicket> {
+    await this.requireTrading(origin);
+    // A new curve the pool index may not list yet: its pools are read and checked there.
+    if (req.pool) this.d.solana.notePagePool(req.mint, req.pool);
+    const ticket = await this.d.solana.buy(
+      {
+        mint: req.mint,
+        amount: req.amount,
+        walletIds: req.walletIds,
+        mode: req.mode,
+        confirmed: false,
+        clickedAt: req.clickedAt,
+        prefs: req.prefs,
+        gate: this.gate(origin, SOLANA_CHAIN_ID, req.walletIds),
+      },
+      tabId,
+    );
+    return this.own(origin, ticket, tabId);
+  }
+
+  async solSell(
+    origin: string,
+    req: RequestOf<'site.sol.sell'>,
+    tabId?: number,
+  ): Promise<TradeTicket> {
+    await this.requireTrading(origin);
+    const ticket = await this.d.solana.sell(
+      {
+        mint: req.mint,
+        bps: req.bps,
+        walletIds: req.walletIds,
+        confirmed: true,
+        clickedAt: req.clickedAt,
+        prefs: req.prefs,
+      },
+      tabId,
+    );
+    return this.own(origin, ticket, tabId);
+  }
+
+  async solQuotes(origin: string, req: RequestOf<'site.sol.quotes'>): Promise<QuoteSet> {
+    await this.requireConnected(origin);
+    // As for a buy: a quick buy's coin is quoted ahead of the press on the pool it names.
+    if (req.pool) this.d.solana.notePagePool(req.mint, req.pool);
+    return this.d.solana.panelQuotes({
+      mint: req.mint,
+      buyAmounts: req.buyAmounts,
+      sellBps: req.sellBps,
+      walletIds: req.walletIds,
+    });
+  }
+
+  /**
+   * Whether the user sees one of the site's buys first, by its dollar value: above the
+   * confirmation amount, or past the minute's budget, as for a trade the site asks to sign.
+   */
+  private gate(origin: string, chainId: number, walletIds: readonly string[]): BuyGate {
+    return async ({ usd, spend, coin }) => {
+      const why = this.needsUser(origin, usd, await this.d.settings.get());
+      if (why) {
+        const picked = (await this.d.vault.listAccounts()).filter((a) => walletIds.includes(a.id));
+        const approved = await this.ask({
+          kind: 'trade',
+          origin,
+          walletName: picked.length === 1 ? (picked[0]?.name ?? '') : `${picked.length} wallets`,
+          summary: `Buy ${coin ?? 'a coin'} for ${spend} on ${networkName(chainId)}`,
+          usd,
+          why,
+        });
+        if (!approved) throw new SiteError('rejected');
+      }
+      this.note(origin, usd);
+      return why !== null;
+    };
+  }
+
+  /** Keeps a trade as the site's, to tell its tab how it goes and let it replace it. */
+  private own(origin: string, ticket: TradeTicket, tabId: number | undefined): TradeTicket {
+    this.trades.set(ticket.id, { origin, tabId });
+    for (const id of [...this.trades.keys()].slice(0, -TRADES_KEPT)) this.trades.delete(id);
+    return ticket;
   }
 
   /** The sites in now: those in from the start and not disconnected, then those approved. */
@@ -419,10 +603,15 @@ export class SiteService {
     return b && b.origin === origin ? bridgeStatus(b.ticket) : null;
   }
 
-  /** Every ticket's news passes here: the bridges sites started are kept up to date. */
+  /**
+   * Every ticket's news passes here: the bridges sites started are kept up to date, and the
+   * tab whose site asked for a trade is told how it goes.
+   */
   noteTicket(ticket: TradeTicket): void {
     const b = this.bridges.get(ticket.id);
     if (b) b.ticket = ticket;
+    const t = this.trades.get(ticket.id);
+    if (t?.tabId !== undefined) this.d.pushTicket(t.tabId, ticket);
   }
 
   private async evmWallet(
@@ -543,6 +732,11 @@ export class SiteService {
 
   private async requireConnected(origin: string): Promise<void> {
     if (!(await this.isConnected(origin))) throw new SiteError('not_connected');
+  }
+
+  private async requireTrading(origin: string): Promise<void> {
+    await this.requireConnected(origin);
+    if (!(await this.d.vault.isUnlocked())) throw new VaultError('locked');
   }
 
   private async connectionList(): Promise<Connection[]> {

@@ -210,6 +210,52 @@ export const PanelSolanaPatchSchema = SolanaSettingsSchema.pick({
   .partial()
   .strict();
 
+/**
+ * The trade settings the Nesty website keeps for itself, which a trade it asks the extension
+ * to make runs with in place of the extension's own: slippage, priority, the tax limit and
+ * private sending. Never an RPC, a limit, the gas cap or the approvals: those stay the
+ * user's settings here, for every trade.
+ */
+export const TradePrefsSchema = z
+  .object({
+    chain: ChainSettingsSchema.pick({
+      slippageBps: true,
+      priority: true,
+      priorityGwei: true,
+      customPriorityGwei: true,
+      mevEnabled: true,
+      maxTaxBps: true,
+    })
+      .partial()
+      .strict()
+      .optional(),
+    solana: SolanaSettingsSchema.pick({
+      slippageBps: true,
+      priority: true,
+      priorityFeeSol: true,
+      customPriorityFeeSol: true,
+    })
+      .partial()
+      .strict()
+      .optional(),
+    global: GlobalSettingsSchema.pick({ jitterMaxMs: true, buyVarianceBps: true })
+      .partial()
+      .strict()
+      .optional(),
+  })
+  .strict();
+export type TradePrefs = z.infer<typeof TradePrefsSchema>;
+
+/** Stored settings with what one trade carried in their place (TradePrefs). */
+export function withPrefs<T extends object>(
+  stored: T,
+  carried: { [K in keyof T]?: T[K] | undefined } | undefined,
+): T {
+  if (!carried) return stored;
+  const set = Object.entries(carried).filter(([, v]) => v !== undefined);
+  return set.length > 0 ? { ...stored, ...Object.fromEntries(set) } : stored;
+}
+
 export const DEFAULT_SOLANA_SETTINGS: SolanaSettings = SolanaSettingsSchema.parse({
   quickBuyAmounts: ['0.05', '0.1', '0.25', '0.5'],
   quickBuyUsd: ['10', '25', '50', '100'],

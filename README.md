@@ -140,20 +140,24 @@ one. On every other site the extension works as described above.
   content script on those origins carries window messages to the background and does
   nothing else.
 - What the site may ask for: whether Nesty is there (with the user's limits), a
-  connection (`https://nesty.trade` has one from the start, until the user disconnects
-  it; the development server, or the site after a disconnect, gets one once the user
-  approves it in an extension window), the wallets' names and public addresses, the
-  unlock window, a signature on a trade or on a new coin
-  (`site.sol.sign`, `site.evm.sign`, `site.evm.permit`), a bridge
+  connection (`https://nesty.trade` has one from the start, until the user turns it off
+  in the popup's Sites card, the only place that can; the development server, or the site
+  once turned off, gets one once the user approves it in an extension window), the
+  wallets' names and public addresses, the unlock window, buys and sells, which the
+  extension makes itself with the panel's engine and keeps in its history
+  (`site.trade.buy`, `site.trade.sell`, `site.trade.quotes`, `site.trade.replace`, `site.sol.buy`,
+  `site.sol.sell`, `site.sol.quotes`) with the site's own slippage, priority, tax limit and
+  private sending (never an RPC or a limit), a signature on a new coin or on a trade an
+  older site builds itself (`site.sol.sign`, `site.evm.sign`, `site.evm.permit`), a bridge
   (`site.bridge.quote`, `site.bridge.send`, `site.bridge.status`), and price alerts
   (`site.alerts.list`, `site.alerts.set`, `site.alerts.remove`), which the extension
   keeps and checks every 30 seconds, with a notification when one is reached. It may also
   follow wallets (`site.tracker.feed`, `site.tracker.follow`, `site.tracker.unfollow`,
   `site.tracker.edit`, `site.tracker.prefs`): at most 20 per site, read from the chain
   every 30 seconds while the browser runs, Solana by signatures and EVM chains by balance
-  and sent count, with a notification (Open coin, Mute) for each new trade. It can
-  never read a key, export one, change settings, or get anything else signed: no
-  transfers or revokes.
+  and sent count, with a notification (Open coin, Mute) for each new trade. Its alerts
+  and followed wallets stay while it is turned off. It can never read a key, export one,
+  change settings, or get anything else signed: no transfers or revokes.
 - Every Solana trade it sends is checked as the panel's are: the route is read again
   from the chain, the Solana validator runs with the user's limits, and the minimum
   received must be at least half of what Nesty's own quote pays. A coin quoted in a
@@ -346,9 +350,9 @@ Tests: every legitimate plan from every venue passes; 19 named malicious payload
 **The Nesty website.** Unlike a terminal page, it can ask for trades without a click
 in Nesty's own UI, so a compromised copy of it could buy coins the user did not choose.
 What it can get is bounded: only from its exact origin, only while it is connected (from
-the start, until the user disconnects it), only trades between the wallet's own funds and
-a coin, or a new coin whose every fee and
-reward goes to the wallet, or a bridge the extension builds itself, each rebuilt or
+the start, until the user turns it off in the popup), only trades between the wallet's
+own funds and a coin, which the extension builds itself, or a new coin whose every fee
+and reward goes to the wallet, or a bridge the extension builds itself, each built or
 re-checked from the chain by the extension, validated as above and held to the same
 limits. A buy above the confirmation amount, or past the per-click limit within a
 minute, waits for the user in an extension window, as every new coin and every bridge

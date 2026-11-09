@@ -13,6 +13,7 @@ import {
   effectivePreset,
   type ChainSettings,
   type GlobalSettings,
+  type TradePrefs,
 } from '../../../shared/settings/defaults';
 import { hasEvm, type EvmAccount } from '../../../shared/wallet';
 import { erc20Abi } from '../../chain/abis';
@@ -42,6 +43,7 @@ import {
 import { PERMIT2 } from '../uniswap/addresses';
 import { validatePermit } from '../validator';
 import {
+  type BuyGate,
   type EngineCore,
   type EngineDeps,
   type TicketState,
@@ -128,11 +130,15 @@ export class TradingFlow {
       mode: 'each' | 'split';
       confirmed: boolean;
       clickedAt?: number | undefined;
+      /** A website trade's own settings, in place of the stored ones. */
+      prefs?: TradePrefs | undefined;
+      /** Who decides whether the user sees this buy first, in place of `confirmed`. */
+      gate?: BuyGate | undefined;
     },
     tabId?: number,
   ): Promise<TradeTicket> {
-    const startedAt = this.core.clickTime(req.clickedAt);
-    const { chain, cs, gs, ctx } = await this.core.context(req.chainId);
+    let startedAt = this.core.clickTime(req.clickedAt);
+    const { chain, cs, gs, ctx } = await this.core.context(req.chainId, req.prefs);
     const wallets = await this.core.wallets(req.walletIds);
     const total = parseEther(req.amount);
     const per = req.mode === 'split' ? total / BigInt(wallets.length) : total;
@@ -154,7 +160,12 @@ export class TradingFlow {
         'limit_exceeded',
         `$${totalUsd.toFixed(2)} total > $${gs.maxUsdPerClick}.`,
       );
-    if (totalUsd > gs.confirmAboveUsd && !req.confirmed)
+    if (req.gate) {
+      const spend = `${formatToken(clickTotal, 18)} ${chain.nativeCurrency.symbol}`;
+      const coin = this.core.symbolNow(ctx, req.token) ?? null;
+      // The time the user took to answer is not the trade's.
+      if (await req.gate({ usd: totalUsd, spend, coin })) startedAt = this.d.now();
+    } else if (totalUsd > gs.confirmAboveUsd && !req.confirmed)
       throw new TradeError('needs_confirmation', `$${totalUsd.toFixed(2)}`);
 
     // The panel prefetches quotes for the quick amounts; a fresh one skips a round trip.
@@ -722,11 +733,13 @@ export class TradingFlow {
       walletIds: string[];
       confirmed: boolean;
       clickedAt?: number | undefined;
+      /** A website trade's own settings, in place of the stored ones. */
+      prefs?: TradePrefs | undefined;
     },
     tabId?: number,
   ): Promise<TradeTicket> {
     const startedAt = this.core.clickTime(req.clickedAt);
-    const { chain, cs, gs, ctx } = await this.core.context(req.chainId);
+    const { chain, cs, gs, ctx } = await this.core.context(req.chainId, req.prefs);
     const wallets = await this.core.wallets(req.walletIds);
     const balances = await Promise.all(
       wallets.map((w) =>

@@ -28,6 +28,7 @@ import { extraVenues, venueRules } from '../background/trade/venues';
 import { Vault, type KeyValueStore } from '../background/vault/vault';
 import { HistoryStore, reachedChain } from '../background/history';
 import { LogoService } from '../background/logos';
+import { panelQuotes } from '../background/panel';
 import { PortfolioService } from '../background/portfolio';
 import { createRelayClient } from '../background/trade/relay';
 import { WsHub } from '../background/ws';
@@ -503,19 +504,44 @@ export default defineBackground({
       },
     };
 
-    // The Nesty website: there the extension only keeps the keys and signs its trades.
+    // The Nesty website: its buys and sells are the extension's own, as the panel's are.
     const site = new SiteService({
       vault,
       solana,
+      engine,
+      // Its panel's quotes keep the routes, fees and nonces its trades use warm.
+      quotes: (req) =>
+        panelQuotes(
+          {
+            settings,
+            client,
+            fetchJson,
+            aggregator,
+            now: Date.now,
+            vault,
+            history,
+            prices,
+            routing,
+            tax,
+            aggregatorCheck,
+            engine,
+          },
+          req,
+        ),
+      // Its tab alone hears how the trades it asked for go.
+      pushTicket: (tabId, ticket) => {
+        const event: PushEvent = { kind: 'nesty.site.ticket', ticket };
+        void browser.tabs.sendMessage(tabId, event).catch(() => undefined);
+      },
       // Bridges it asks for are the extension's own: quoted, checked and sent here.
       bridge: {
         quote: (req) =>
           isSolana(req.fromChainId) ? solana.bridge.quote(req) : engine.bridgeQuote(req),
         send: (req) => (isSolana(req.fromChainId) ? solana.bridge.bridge(req) : engine.bridge(req)),
       },
-      // Its EVM transactions are built again here from the same venues the panel uses.
       alerts,
       tracker,
+      // What it still builds itself is built again here from the venues the panel uses.
       evm: new SiteEvmChecker({
         settings,
         client,
@@ -528,7 +554,7 @@ export default defineBackground({
       }),
       settings,
       local,
-      // nesty.trade is Nesty's own: connected from the start, until the user disconnects it.
+      // nesty.trade is Nesty's own: connected from the start, until the user turns it off.
       connectedByDefault: HOSTED_SITE_ORIGINS,
       openApproval: async (id) =>
         (

@@ -127,6 +127,8 @@ const PASSIVE: ReadonlySet<RequestType> = new Set<RequestType>([
   'sol.send.checkRecipient',
   'site.hello',
   'site.wallets',
+  'site.trade.quotes',
+  'site.sol.quotes',
   'site.alerts.list',
   'site.tracker.feed',
   'site.pending',
@@ -510,14 +512,25 @@ async function dispatch(
       return d.site.hello(siteOrigin(meta));
     case 'site.connect':
       return d.site.connect(siteOrigin(meta));
-    case 'site.disconnect':
-      await d.site.disconnect(siteOrigin(meta));
-      return null;
     case 'site.wallets':
       return d.site.wallets(siteOrigin(meta));
     case 'site.unlock':
       await d.site.unlock();
       return null;
+    case 'site.trade.buy':
+      return d.site.buy(siteOrigin(meta), req, meta.tabId);
+    case 'site.trade.sell':
+      return d.site.sell(siteOrigin(meta), req, meta.tabId);
+    case 'site.trade.quotes':
+      return d.site.quotes(siteOrigin(meta), req);
+    case 'site.trade.replace':
+      return d.site.replace(siteOrigin(meta), req);
+    case 'site.sol.buy':
+      return d.site.solBuy(siteOrigin(meta), req, meta.tabId);
+    case 'site.sol.sell':
+      return d.site.solSell(siteOrigin(meta), req, meta.tabId);
+    case 'site.sol.quotes':
+      return d.site.solQuotes(siteOrigin(meta), req);
     case 'site.sol.sign':
       return d.site.signSolana(siteOrigin(meta), req);
     case 'site.evm.sign':

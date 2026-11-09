@@ -1095,7 +1095,8 @@ function Sites() {
           </span>
           {isNestySite(tab.origin) ? (
             <span class="hint">
-              The Nesty website: no panel here. The site trades on its own and asks Nesty to sign.
+              The Nesty website: no panel here. Nesty makes the site's trades, as it does the
+              panel's.
             </span>
           ) : status?.builtin ? (
             <span class="hint">Built-in site — always enabled.</span>
@@ -1121,7 +1122,7 @@ function Sites() {
   );
 }
 
-/** Sites the user connected: they see the wallets' addresses and ask for trades to be signed. */
+/** Sites the user connected: they see the wallets' addresses and ask Nesty for trades. */
 function SiteConnections() {
   const [list, setList] = useState<{ origin: string; at: number }[]>([]);
   const load = () => {
@@ -1133,8 +1134,8 @@ function SiteConnections() {
     <div class="card" style={{ padding: '12px', display: 'grid', gap: '8px' }}>
       <span class="set-label">Connected to the Nesty website</span>
       <span class="hint">
-        It sees your wallets' addresses and asks Nesty to sign its trades, each checked against your
-        safety limits. It never sees a key and cannot send funds.
+        It sees your wallets' addresses and asks Nesty for trades, which Nesty makes and checks
+        against your safety limits. It never sees a key and cannot send funds.
       </span>
       {list.map((c) => (
         <div class="row" key={c.origin}>

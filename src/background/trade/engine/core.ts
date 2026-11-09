@@ -22,8 +22,10 @@ import { formatToken } from '../../../shared/format';
 import { sanitizeLabel } from '../../../shared/sanitize';
 import {
   effectivePreset,
+  withPrefs,
   type ChainSettings,
   type GlobalSettings,
+  type TradePrefs,
 } from '../../../shared/settings/defaults';
 import { hasEvm, type EvmAccount, type WalletAccount } from '../../../shared/wallet';
 import { erc20Abi } from '../../chain/abis';
@@ -250,14 +252,34 @@ export function gasFeeRefusal(
   return `Gas fee about $${usd.toFixed(2)} (${formatToken(feeWei, 18)} ${symbol}) is above your gas limit of $${maxGasUsd}. Lower the priority fee or raise the limit in Settings.`;
 }
 
-/** The chain, its settings and the venue context that quotes and trades on it run with. */
+/**
+ * For a buy someone else asked for (the Nesty website), in place of `confirmed`: decides
+ * whether the user sees it first, from its dollar value and what it spends. Resolves true
+ * once the user was asked and agreed, false when they did not need to be; throws to refuse.
+ */
+export type BuyGate = (buy: {
+  usd: number;
+  spend: string;
+  coin: string | null;
+}) => Promise<boolean>;
+
+/**
+ * The chain, its settings and the venue context that quotes and trades on it run with.
+ * `prefs`: a website trade's own settings, in place of the stored ones (never an RPC).
+ */
 export async function chainContext(
   d: Pick<EngineDeps, 'settings' | 'client' | 'fetchJson' | 'aggregator' | 'now'>,
   chainId: number,
+  prefs?: TradePrefs,
 ): Promise<{ chain: ChainConfig; cs: ChainSettings; gs: GlobalSettings; ctx: VenueCtx }> {
   const chain = getChain(chainId);
   if (!chain) throw new TradeError('unsupported_chain');
-  const [cs, gs] = await Promise.all([d.settings.getChain(chainId), d.settings.get()]);
+  const [stored, storedGlobal] = await Promise.all([
+    d.settings.getChain(chainId),
+    d.settings.get(),
+  ]);
+  const cs = withPrefs(stored, prefs?.chain);
+  const gs = withPrefs(storedGlobal, prefs?.global);
   const ctx: VenueCtx = {
     chain,
     client: d.client(chain, cs),
@@ -302,8 +324,8 @@ export class EngineCore {
 
   // ── context helpers ───────────────────────────────────────────────────────
 
-  context(chainId: number) {
-    return chainContext(this.d, chainId);
+  context(chainId: number, prefs?: TradePrefs) {
+    return chainContext(this.d, chainId, prefs);
   }
 
   async wallets(ids: readonly string[]): Promise<EvmAccount[]> {

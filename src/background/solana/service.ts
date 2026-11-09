@@ -17,8 +17,10 @@ import { costBasis } from '../../shared/pnl';
 import { sanitizeLabel } from '../../shared/sanitize';
 import {
   solanaPriorityFee,
+  withPrefs,
   type GlobalSettings,
   type SolanaSettings,
+  type TradePrefs,
 } from '../../shared/settings/defaults';
 import type { SolanaTarget } from '../../shared/detection';
 import { SOLANA, SOLANA_CHAIN_ID, isSolAddress, type SolAddress } from '../../shared/solana';
@@ -26,7 +28,14 @@ import type { WalletAccount } from '../../shared/wallet';
 import type { HistoryStore } from '../history';
 import { DUST_USD } from '../portfolio';
 import type { SettingsStore } from '../settings';
-import { TradeError, markRefused, shortErr, sleep, walletAmounts } from '../trade/engine/core';
+import {
+  TradeError,
+  markRefused,
+  shortErr,
+  sleep,
+  walletAmounts,
+  type BuyGate,
+} from '../trade/engine/core';
 import { priceImpactBps } from '../trade/routing';
 import type { KeyValueStore, Vault } from '../vault/vault';
 import {
@@ -1285,6 +1294,8 @@ export class SolanaService {
     mint: SolAddress;
     buyAmounts: string[];
     sellBps: number[];
+    /** The wallets sells are sized for (the website's own choice), else the selected ones. */
+    walletIds?: readonly string[] | undefined;
   }): Promise<QuoteSet> {
     void this.warm().catch(() => undefined);
     const [{ routes, idle, funding }, meta, gs] = await Promise.all([
@@ -1334,7 +1345,7 @@ export class SolanaService {
     let held = 0n;
     if (req.sellBps.length > 0 && (await this.d.vault.isUnlocked())) {
       const wallets = await this.solWallets();
-      const ids = new Set(await this.selectedIds(gs, wallets));
+      const ids = new Set(req.walletIds ?? (await this.selectedIds(gs, wallets)));
       const owners = wallets.filter((a) => ids.has(a.id)).map((a) => a.solana);
       held = (await this.balances(owners, req.mint, meta.tokenProgram)).reduce(
         (s, b) => s + b.token,
@@ -1440,6 +1451,12 @@ export class SolanaService {
     this.d.notify(structuredClone(st.ticket), st.tabId);
   }
 
+  /** The settings a trade runs with: the stored ones, with a website trade's own in place. */
+  private async tradeSettings(prefs: TradePrefs | undefined) {
+    const [gs, ss] = await Promise.all([this.d.settings.get(), this.d.settings.getSolana()]);
+    return [withPrefs(gs, prefs?.global), withPrefs(ss, prefs?.solana)] as const;
+  }
+
   private clickTime(clickedAt: number | undefined): number {
     const now = this.d.now();
     return clickedAt !== undefined && clickedAt <= now && now - clickedAt < 30_000
@@ -1464,17 +1481,18 @@ export class SolanaService {
       mode: 'each' | 'split';
       confirmed: boolean;
       clickedAt?: number | undefined;
+      /** A website trade's own settings, in place of the stored ones. */
+      prefs?: TradePrefs | undefined;
+      /** Who decides whether the user sees this buy first, in place of `confirmed`. */
+      gate?: BuyGate | undefined;
     },
     tabId?: number,
   ): Promise<TradeTicket> {
-    const startedAt = this.clickTime(req.clickedAt);
-    const [gs, ss] = await Promise.all([this.d.settings.get(), this.d.settings.getSolana()]);
+    let startedAt = this.clickTime(req.clickedAt);
+    const [gs, ss] = await this.tradeSettings(req.prefs);
     const wallets = await this.tradeWallets(req.walletIds);
     // The panel refreshes quotes about every second, so this is normally a cache hit.
-    const { routes, idle, funding } = await this.market(
-      req.mint,
-      Math.min(gs.maxQuoteAgeMs, 2_000),
-    );
+    let { routes, idle, funding } = await this.market(req.mint, Math.min(gs.maxQuoteAgeMs, 2_000));
     const primary = routes[0];
     if (!primary) throw new TradeError('no_route', idle ?? undefined);
     if (idle) throw new TradeError('no_route', idle);
@@ -1504,7 +1522,18 @@ export class SolanaService {
         'limit_exceeded',
         `$${totalUsd.toFixed(2)} total > $${gs.maxUsdPerClick}.`,
       );
-    if (totalUsd > gs.confirmAboveUsd && !req.confirmed)
+    if (req.gate) {
+      const coin = (await this.tokenMeta(req.mint))?.symbol ?? null;
+      const spent = `${formatUnits(clickTotal, spend.decimals)} ${spend.symbol}`;
+      if (await req.gate({ usd: totalUsd, spend: spent, coin })) {
+        // The time the user took to answer is not the trade's; prices moved meanwhile.
+        startedAt = this.d.now();
+        const was = !!funding;
+        ({ routes, idle, funding } = await this.market(req.mint, 0));
+        if (!routes[0] || idle || !!funding !== was)
+          throw new TradeError('no_route', idle ?? 'This coin changed pools. Try again.');
+      }
+    } else if (totalUsd > gs.confirmAboveUsd && !req.confirmed)
       throw new TradeError('needs_confirmation', `$${totalUsd.toFixed(2)}`);
 
     // The wallets buy one after another from the same curve or pool: price the whole click
@@ -1586,11 +1615,13 @@ export class SolanaService {
       walletIds: string[];
       confirmed: boolean;
       clickedAt?: number | undefined;
+      /** A website trade's own settings, in place of the stored ones. */
+      prefs?: TradePrefs | undefined;
     },
     tabId?: number,
   ): Promise<TradeTicket> {
     const startedAt = this.clickTime(req.clickedAt);
-    const [gs, ss] = await Promise.all([this.d.settings.get(), this.d.settings.getSolana()]);
+    const [gs, ss] = await this.tradeSettings(req.prefs);
     const wallets = await this.tradeWallets(req.walletIds);
     const meta = await this.tokenMeta(req.mint);
     if (!meta) throw new TradeError('no_route');

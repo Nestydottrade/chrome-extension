@@ -120,7 +120,7 @@ describe('isAllowed', () => {
     );
   });
 
-  it('the Nesty website may connect, ask for trades to be signed, bridges, price alerts and followed wallets, and nothing else', () => {
+  it('the Nesty website may connect, ask for trades, signatures, bridges, price alerts and followed wallets, and nothing else', () => {
     const site = [...RequestSchema.options]
       .map((o) => o.shape.type.value as RequestType)
       .filter((type) => isAllowed('nesty-site', type));
@@ -132,16 +132,22 @@ describe('isAllowed', () => {
       'site.bridge.send',
       'site.bridge.status',
       'site.connect',
-      'site.disconnect',
       'site.evm.permit',
       'site.evm.sign',
       'site.hello',
+      'site.sol.buy',
+      'site.sol.quotes',
+      'site.sol.sell',
       'site.sol.sign',
       'site.tracker.edit',
       'site.tracker.feed',
       'site.tracker.follow',
       'site.tracker.prefs',
       'site.tracker.unfollow',
+      'site.trade.buy',
+      'site.trade.quotes',
+      'site.trade.replace',
+      'site.trade.sell',
       'site.unlock',
       'site.wallets',
     ]);

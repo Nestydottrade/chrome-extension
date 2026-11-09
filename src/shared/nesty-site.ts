@@ -1,11 +1,11 @@
 /**
- * The Nesty website. There the extension shows no panel: it keeps the keys and signs the
- * trades the site builds, each checked again here first (route, limits, validator).
+ * The Nesty website. There the extension shows no panel: it keeps the keys and makes the
+ * site's trades itself, as the panel's (route, limits, validator).
  */
 
 /**
  * The hosted site, trusted by every build, and connected from the start until the user
- * disconnects it. www.nesty.trade only redirects here.
+ * turns it off in the popup. www.nesty.trade only redirects here.
  */
 export const HOSTED_SITE_ORIGINS: readonly string[] = ['https://nesty.trade'];
 

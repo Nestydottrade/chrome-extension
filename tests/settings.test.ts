@@ -1,11 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import { SettingsStore } from '../src/background/settings';
 import type { KeyValueStore } from '../src/background/vault/vault';
+import { chainContext } from '../src/background/trade/engine';
 import { getChain } from '../src/shared/chains';
 import {
   PanelChainPatchSchema,
+  TradePrefsSchema,
   defaultChainSettings,
   effectivePreset,
+  withPrefs,
 } from '../src/shared/settings/defaults';
 
 class MemoryStore implements KeyValueStore {
@@ -61,6 +64,60 @@ describe('chain trade settings', () => {
       PanelChainPatchSchema.safeParse({ quickSellBps: [2500, 5000, 7500, 10_001] }).success,
     ).toBe(false);
     expect(PanelChainPatchSchema.safeParse({ quickSellBps: [2500, 5000] }).success).toBe(false);
+  });
+
+  it('lets a website trade carry its own trade settings, never an RPC, a limit or the gas cap', () => {
+    expect(
+      TradePrefsSchema.safeParse({
+        chain: { slippageBps: 2000, priority: 'high', maxTaxBps: 1000, mevEnabled: false },
+        solana: {
+          slippageBps: 1500,
+          priority: 'custom',
+          customPriorityFeeSol: '0.001',
+          priorityFeeSol: { low: '0.0001', medium: '0.0002', high: '0.003' },
+        },
+        global: { jitterMaxMs: 100, buyVarianceBps: 500 },
+      }).success,
+    ).toBe(true);
+    expect(TradePrefsSchema.safeParse({}).success).toBe(true);
+    for (const bad of [
+      { chain: { customRpc: 'https://evil.example' } },
+      { chain: { wsRpc: 'wss://evil.example' } },
+      { chain: { mevRpc: 'https://evil.example' } },
+      { chain: { maxFeeMultiplier: 9 } },
+      { chain: { slippageBps: 9000 } },
+      { solana: { customRpc: 'https://evil.example' } },
+      { global: { maxUsdPerTx: 1e9 } },
+      { global: { confirmAboveUsd: 1e9 } },
+      { global: { maxGasUsd: 1e9 } },
+      { global: { unlimitedApprovals: true } },
+      { global: { jitterMaxMs: 5000 } },
+      { limits: {} },
+    ])
+      expect(TradePrefsSchema.safeParse(bad).success).toBe(false);
+  });
+
+  it("runs a trade with a website's settings in place of the stored ones, and only those", async () => {
+    const settings = new SettingsStore(new MemoryStore());
+    const d = {
+      settings,
+      client: () => ({}),
+      fetchJson: async () => null,
+      now: () => 0,
+    } as unknown as Parameters<typeof chainContext>[0];
+    const stored = await settings.getChain(8453);
+    const global = await settings.get();
+    const { cs, gs } = await chainContext(d, 8453, {
+      chain: { slippageBps: 2000, priority: 'high' },
+      global: { jitterMaxMs: 100 },
+    });
+    expect(cs).toEqual({ ...stored, slippageBps: 2000, priority: 'high' });
+    expect(gs).toEqual({ ...global, jitterMaxMs: 100 });
+    // Nothing is stored: the next trade runs with the user's own again.
+    expect(await settings.getChain(8453)).toEqual(stored);
+    expect((await chainContext(d, 8453)).cs).toEqual(stored);
+    // A field left out keeps the stored value.
+    expect(withPrefs(stored, { slippageBps: undefined })).toBe(stored);
   });
 
   it('reads settings saved by the old P1–P3 version without breaking', async () => {
