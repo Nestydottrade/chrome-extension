@@ -36,6 +36,7 @@ import {
   walletAmounts,
   type BuyGate,
 } from '../trade/engine/core';
+import { ReadAhead } from '../trade/read-ahead';
 import { priceImpactBps } from '../trade/routing';
 import type { KeyValueStore, Vault } from '../vault/vault';
 import {
@@ -373,6 +374,8 @@ export class SolanaService {
   private readonly usdPrices = new Map<SolAddress, { at: number; usd: number | null }>();
   private readonly metas = new Map<SolAddress, SolTokenMeta | null>();
   private readonly tickets = new Map<string, SolTicket>();
+  /** Balances read with the panel's quotes, for the next sell's click. */
+  private readonly readAhead = new ReadAhead(() => this.d.now());
   private blockhashCache: {
     at: number;
     value: { blockhash: string; lastValidBlockHeight: number };
@@ -1290,6 +1293,20 @@ export class SolanaService {
     };
   }
 
+  /**
+   * The reads made ahead for a sell (ReadAhead), or null while a transaction from the wallet is
+   * still out: its balance may change any moment.
+   */
+  private ahead(walletId: string): ReadAhead | null {
+    for (const st of this.tickets.values()) {
+      const out = st.ticket.legs.some(
+        (l) => l.walletId === walletId && (l.status === 'sending' || l.status === 'submitted'),
+      );
+      if (out) return null;
+    }
+    return this.readAhead;
+  }
+
   async panelQuotes(req: {
     mint: SolAddress;
     buyAmounts: string[];
@@ -1347,10 +1364,14 @@ export class SolanaService {
       const wallets = await this.solWallets();
       const ids = new Set(req.walletIds ?? (await this.selectedIds(gs, wallets)));
       const owners = wallets.filter((a) => ids.has(a.id)).map((a) => a.solana);
-      held = (await this.balances(owners, req.mint, meta.tokenProgram)).reduce(
-        (s, b) => s + b.token,
-        0n,
-      );
+      const at = this.d.now();
+      const balances = await this.balances(owners, req.mint, meta.tokenProgram);
+      // Kept briefly, so a sell clicked next skips reading them (ReadAhead).
+      balances.forEach((b, i) => {
+        const owner = owners[i];
+        if (owner) this.readAhead.noteBalance(SOLANA_CHAIN_ID, req.mint, owner, b.token, at);
+      });
+      held = balances.reduce((s, b) => s + b.token, 0n);
     }
     const sellIn = held > 0n ? req.sellBps.map((bps) => (held * BigInt(bps)) / 10_000n) : [];
     const smallestSell = sellIn.reduce((m, a) => (a > 0n && (m === 0n || a < m) ? a : m), 0n);
@@ -1625,12 +1646,20 @@ export class SolanaService {
     const wallets = await this.tradeWallets(req.walletIds);
     const meta = await this.tokenMeta(req.mint);
     if (!meta) throw new TradeError('no_route');
-    const balances = await this.balances(
-      wallets.map((w) => w.solana),
-      req.mint,
-      meta.tokenProgram,
+    // Read with the panel's quotes moments ago, while that still counts (ReadAhead); else now.
+    const ahead = wallets.map((w) =>
+      this.ahead(w.id)?.balance(SOLANA_CHAIN_ID, req.mint, w.solana),
     );
-    const amounts = balances.map((b) => (b.token * BigInt(req.bps)) / 10_000n);
+    const held = ahead.every((b): b is bigint => b !== undefined)
+      ? ahead
+      : (
+          await this.balances(
+            wallets.map((w) => w.solana),
+            req.mint,
+            meta.tokenProgram,
+          )
+        ).map((b) => b.token);
+    const amounts = held.map((token) => (token * BigInt(req.bps)) / 10_000n);
     const totalIn = amounts.reduce((a, b) => a + b, 0n);
     if (totalIn === 0n) throw new TradeError('insufficient_funds', 'No tokens to sell.');
 
@@ -2059,6 +2088,8 @@ export class SolanaService {
       await rpc.broadcast(raw);
       const tDone = this.d.now();
       leg.status = 'submitted';
+      // What was read of the wallet ahead no longer counts (ReadAhead).
+      this.readAhead.moved(SOLANA_CHAIN_ID, job.wallet.solana);
       leg.sentMs = Math.max(0, tDone - st.startedAt);
       leg.phases = {
         prepMs: Math.max(0, tCheck - st.startedAt),
@@ -2141,6 +2172,8 @@ export class SolanaService {
         status?.confirmationStatus === 'finalized'
       ) {
         leg.confirmMs = Math.max(0, this.d.now() - sentAt);
+        // It landed: what was read of the wallet before is out of date.
+        this.readAhead.moved(SOLANA_CHAIN_ID, p.job.wallet.solana);
         if (status.err) {
           leg.status = 'failed';
           leg.error = explainError(status.err, p.ixs);

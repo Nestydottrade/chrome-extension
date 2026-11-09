@@ -17,7 +17,7 @@ import {
 } from '../../../shared/settings/defaults';
 import { hasEvm, type EvmAccount } from '../../../shared/wallet';
 import { erc20Abi } from '../../chain/abis';
-import { buildPermit, readPermit2Allowance } from '../permit2';
+import { buildPermit, permit2Abi, readPermit2Allowance } from '../permit2';
 import { tokenReceived } from '../receipts';
 import type { TradeRef } from '../signer';
 import { taxGate, type TaxInfo } from '../tax';
@@ -57,6 +57,11 @@ import {
 const DEADLINE_S = 10 * 60;
 /** Slippage for converting native into a funding asset (VIRTUAL): a deep pool. */
 const FUNDING_SLIPPAGE_BPS = 100;
+/**
+ * How often a coin's sell allowances are read ahead for the same wallets: every other round
+ * of the panel's quotes, so a read is younger than READ_AHEAD_FRESH_MS when the click comes.
+ */
+const PREPARE_EVERY_MS = 2_000;
 
 /**
  * Allowance to grant a sell spender. The spender itself is still limited to Permit2 or an
@@ -114,6 +119,8 @@ interface SellParams {
 /** Buys and sells from the panel: one leg per wallet, sent in parallel. */
 export class TradingFlow {
   private readonly d: EngineDeps;
+  /** When each coin's sell allowances were last read ahead, by coin, spenders and wallets. */
+  private readonly prepared = new Map<string, number>();
 
   constructor(private readonly core: EngineCore) {
     this.d = core.d;
@@ -326,6 +333,19 @@ export class TradingFlow {
         },
       (e: unknown) => () => `Balance check failed: ${shortErr(e)}`,
     );
+  }
+
+  /**
+   * Who a sell on `route` lets take the tokens: the venue's spender, or Permit2 when the sell
+   * goes through the Nesty Router (the tokens reach it in a one-time Permit2 transfer).
+   */
+  private sellPath(chain: ChainConfig, ctx: VenueCtx, route: Routed) {
+    const funding = route.venue.funding?.(ctx, route.pool);
+    const via = funding ? this.viaRouter(chain, ctx, funding) : null;
+    const approval = via
+      ? { spender: PERMIT2, viaPermit2: false, router: via.router }
+      : route.venue.sellApproval(ctx, route.pool);
+    return { funding, via, approval };
   }
 
   /** The Nesty Router for a funded pool, when the chain has one and can trade the leg. */
@@ -741,14 +761,17 @@ export class TradingFlow {
     const startedAt = this.core.clickTime(req.clickedAt);
     const { chain, cs, gs, ctx } = await this.core.context(req.chainId, req.prefs);
     const wallets = await this.core.wallets(req.walletIds);
+    // Read with the panel's quotes moments ago, while that still counts (ReadAhead); else now.
     const balances = await Promise.all(
-      wallets.map((w) =>
-        ctx.client.readContract({
-          address: req.token,
-          abi: erc20Abi,
-          functionName: 'balanceOf',
-          args: [w.address],
-        }),
+      wallets.map(
+        (w) =>
+          this.core.ahead(chain.id, w.id)?.balance(chain.id, req.token, w.address) ??
+          ctx.client.readContract({
+            address: req.token,
+            abi: erc20Abi,
+            functionName: 'balanceOf',
+            args: [w.address],
+          }),
       ),
     );
     const amounts = balances.map((b) => (b * BigInt(req.bps)) / 10_000n);
@@ -804,6 +827,76 @@ export class TradingFlow {
     return structuredClone(st.ticket);
   }
 
+  /**
+   * Reads ahead what a sell on these routes reads at the click: each wallet's allowance for the
+   * route's spender, and its Permit2 allowance where the venue sells through Permit2. Kept
+   * briefly (ReadAhead), so a sell clicked next skips those round trips.
+   */
+  async prepareSell(
+    ctx: VenueCtx,
+    token: Address,
+    routes: readonly Routed[],
+    wallets: readonly Address[],
+  ): Promise<void> {
+    const reads = new Map<string, { permit2: boolean; spender: Address }>();
+    for (const route of routes) {
+      const { approval } = this.sellPath(ctx.chain, ctx, route);
+      reads.set(`a:${approval.spender.toLowerCase()}`, {
+        permit2: false,
+        spender: approval.spender,
+      });
+      if (approval.viaPermit2)
+        reads.set(`p:${approval.router.toLowerCase()}`, {
+          permit2: true,
+          spender: approval.router,
+        });
+    }
+    const list = [...reads.values()];
+    if (list.length === 0 || wallets.length === 0) return;
+    const at = this.d.now();
+    const key = [
+      ctx.chain.id,
+      token.toLowerCase(),
+      ...list.map((r) => `${r.permit2 ? 'p' : 'a'}${r.spender.toLowerCase()}`),
+      ...wallets.map((w) => w.toLowerCase()),
+    ].join(':');
+    if (at - (this.prepared.get(key) ?? -Infinity) < PREPARE_EVERY_MS) return;
+    this.prepared.set(key, at);
+    if (this.prepared.size > 200)
+      for (const [k, t] of this.prepared) if (at - t >= PREPARE_EVERY_MS) this.prepared.delete(k);
+    const results = await ctx.client.multicall({
+      allowFailure: true,
+      contracts: wallets.flatMap((w) =>
+        list.map((r) =>
+          r.permit2
+            ? ({
+                address: PERMIT2,
+                abi: permit2Abi,
+                functionName: 'allowance',
+                args: [w, token, r.spender],
+              } as const)
+            : ({
+                address: token,
+                abi: erc20Abi,
+                functionName: 'allowance',
+                args: [w, r.spender],
+              } as const),
+        ),
+      ),
+    });
+    const h = this.core.readAhead;
+    wallets.forEach((w, wi) =>
+      list.forEach((r, ri) => {
+        const res = results[wi * list.length + ri];
+        if (res?.status !== 'success') return;
+        if (r.permit2) {
+          const [amount, expiration, nonce] = res.result as readonly [bigint, number, number];
+          h.notePermit2(ctx.chain.id, token, w, r.spender, { amount, expiration, nonce }, at);
+        } else h.noteAllowance(ctx.chain.id, token, w, r.spender, res.result as bigint, at);
+      }),
+    );
+  }
+
   private async sellOne(st: TicketState, i: number, p: SellParams): Promise<void> {
     const leg = st.ticket.legs[i] as TicketLeg;
     const { chain, cs, gs, ctx, wallet, amount, route } = p;
@@ -811,23 +904,21 @@ export class TradingFlow {
     const ref = p.ref ?? refOf(route);
     try {
       const preset = effectivePreset(cs);
-      const funding = route.venue.funding?.(ctx, route.pool);
-      const via = funding ? this.viaRouter(chain, ctx, funding) : null;
-      // Through the Nesty Router, the tokens go to it in a one-time Permit2 transfer.
-      const approval = via
-        ? { spender: PERMIT2, viaPermit2: false, router: via.router }
-        : route.venue.sellApproval(ctx, route.pool);
+      const { funding, via, approval } = this.sellPath(chain, ctx, route);
+      // Read with the panel's quotes moments ago, while that still counts (ReadAhead); else now.
+      const ahead = this.core.ahead(chain.id, wallet.id);
       const [out, allowance] = await Promise.all([
         // A single-wallet sell has exactly the amount that was just quoted.
         amount === p.quotedIn
           ? Promise.resolve(route.out)
           : this.d.routing.requote(ctx, route.pool, 'sell', amount),
-        ctx.client.readContract({
-          address: token,
-          abi: erc20Abi,
-          functionName: 'allowance',
-          args: [wallet.address, approval.spender],
-        }),
+        ahead?.allowance(chain.id, token, wallet.address, approval.spender) ??
+          ctx.client.readContract({
+            address: token,
+            abi: erc20Abi,
+            functionName: 'allowance',
+            args: [wallet.address, approval.spender],
+          }),
       ]);
       if (!out) {
         leg.status = 'failed';
@@ -906,7 +997,10 @@ export class TradingFlow {
       // 2) Permit2 signature for exactly this amount, when the router's Permit2 allowance is short.
       let permit: { signature: Hex; permit: ReturnType<typeof buildPermit> } | undefined;
       if (approval.viaPermit2) {
-        const p2 = await readPermit2Allowance(ctx.client, wallet.address, token, approval.router);
+        // An approval sent just above voids what was read ahead, so it is read again then.
+        const p2 =
+          ahead?.permit2(chain.id, token, wallet.address, approval.router) ??
+          (await readPermit2Allowance(ctx.client, wallet.address, token, approval.router));
         if (p2.amount < amount || p2.expiration <= nowS + 60) {
           const permitMsg = buildPermit(token, approval.router, amount, p2.nonce, nowS);
           const check = validatePermit(permitMsg, vctx);

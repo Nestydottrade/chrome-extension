@@ -87,4 +87,14 @@ export class TradeEngine {
   warm(...a: Parameters<EngineCore['warm']>) {
     return this.core.warm(...a);
   }
+
+  /** Balances for the panel's sells, kept briefly so a sell clicked next skips the read. */
+  readHeld(...a: Parameters<EngineCore['readHeld']>) {
+    return this.core.readHeld(...a);
+  }
+
+  /** Reads ahead the allowances a sell on these routes would read at the click. */
+  prepareSell(...a: Parameters<TradingFlow['prepareSell']>) {
+    return this.trading.prepareSell(...a);
+  }
 }

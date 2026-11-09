@@ -25,7 +25,7 @@ export type PanelDeps = Pick<
   routing: Routing;
   tax: TaxService;
   aggregatorCheck?: Pick<AggregatorCheck, 'trusted'>;
-  engine: Pick<TradeEngine, 'warm'>;
+  engine: Pick<TradeEngine, 'warm' | 'readHeld' | 'prepareSell'>;
 };
 
 /** Wallets the panel trades with: the selected ones, else the primary wallet. */
@@ -144,14 +144,23 @@ export async function panelQuotes(
   }
 
   const buyIn = req.buyAmounts.map((a) => parseEther(a));
-  let held = 0n;
+  // Each wallet's balance, kept briefly so a sell clicked next skips reading it (ReadAhead).
+  let holders: { address: Address; held: bigint }[] = [];
   if (req.sellBps.length > 0 && (await d.vault.isUnlocked())) {
     const accounts = (await d.vault.listAccounts()).filter(hasEvm);
     const ids = new Set(await tradingIds());
     const addrs = accounts.filter((a) => ids.has(a.id)).map((a) => a.address);
-    held = (await readBalances(ctx.client, req.token, addrs)).reduce((s, b) => s + b.token, 0n);
+    const held = await d.engine.readHeld(ctx, req.token, addrs);
+    holders = addrs.flatMap((address, i) => {
+      const amount = held[i] ?? 0n;
+      return amount > 0n ? [{ address, held: amount }] : [];
+    });
   }
-  const sellIn = held > 0n ? req.sellBps.map((bps) => (held * BigInt(bps)) / 10_000n) : [];
+  // Sized as the sell sizes it, each wallet's share summed, so the sell finds this route.
+  const sellIn =
+    holders.length > 0
+      ? req.sellBps.map((bps) => holders.reduce((s, h) => s + (h.held * BigInt(bps)) / 10_000n, 0n))
+      : [];
 
   const smallestBuy =
     buyIn.reduce((m, a) => (a > 0n && (m === 0n || a < m) ? a : m), 0n) || parseEther('0.001');
@@ -168,6 +177,17 @@ export async function panelQuotes(
       ? d.routing.bestWithRef(ctx, req.token, 'sell', sellRef, sellIn, { refresh: true })
       : Promise.resolve([]),
   ]);
+  // The allowances a sell on these routes reads at the click, read ahead (not awaited).
+  const sellRouted = sellRoutes.flatMap((r) => (r.route ? [r.route] : []));
+  if (holders.length > 0 && sellRouted.length > 0)
+    void d.engine
+      .prepareSell(
+        ctx,
+        req.token,
+        sellRouted,
+        holders.map((h) => h.address),
+      )
+      .catch(() => undefined);
   const nativeUsd = d.prices.peek(ctx);
 
   // A winning aggregator quote gets its fill checked in the background; if it falls short,

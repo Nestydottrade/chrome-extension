@@ -447,4 +447,26 @@ describe('Solana coins priced in a token, bought and sold with SOL', () => {
         .find((a) => a !== null && a !== undefined);
     expect(amounts(signed[1])?.amountIn).toBe(usdcBack);
   });
+
+  it('sells what the quotes just read, until a transaction from the wallet moves it', async () => {
+    const held = { coin: 1_000n * 10n ** 6n };
+    const usdcBack = 9_870_000n;
+    const { svc, settled } = await setup(held, [
+      landed(USDC_MINT, usdcBack),
+      landed(USDC_MINT, -usdcBack, 65_000_000n),
+      landed(USDC_MINT, usdcBack),
+      landed(USDC_MINT, -usdcBack, 65_000_000n),
+    ]);
+    await svc.panelQuotes({ mint: COIN, buyAmounts: ['1'], sellBps: [10_000] });
+    // The chain moves after the quotes read it: the click takes their read, and reads nothing.
+    held.coin = 400n * 10n ** 6n;
+    const first = await svc.sell({ mint: COIN, bps: 10_000, walletIds: ['a'], confirmed: false });
+    expect(first.legs[0]?.amountIn).toBe((1_000n * 10n ** 6n).toString());
+    await settled(first.id);
+
+    // That sell went out and landed: what was read before it no longer counts.
+    const second = await svc.sell({ mint: COIN, bps: 10_000, walletIds: ['a'], confirmed: false });
+    expect(second.legs[0]?.amountIn).toBe((400n * 10n ** 6n).toString());
+    await settled(second.id);
+  });
 });

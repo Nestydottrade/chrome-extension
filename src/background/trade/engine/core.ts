@@ -32,7 +32,9 @@ import { erc20Abi } from '../../chain/abis';
 import type { SettingsStore } from '../../settings';
 import type { Vault } from '../../vault/vault';
 import type { AggregatorCheck } from '../aggregator-check';
+import { readTokenBalances } from '../../balances';
 import { bumpFees, staticGas, type FeeCache, type Fees, type GasKind } from '../fees';
+import { ReadAhead } from '../read-ahead';
 import type { NonceManager } from '../nonce';
 import type { PriceService } from '../prices';
 import { feePaid, nativeUnwrapped, tokenReceived } from '../receipts';
@@ -317,9 +319,12 @@ export class EngineCore {
   private readonly symbols = new Map<string, string>();
   private readonly decimals = new Map<string, number>();
   readonly signer: EvmSigner;
+  /** Balances and allowances read with the panel's quotes, for the next sell's click. */
+  readonly readAhead: ReadAhead;
 
   constructor(readonly d: EngineDeps) {
     this.signer = d.signer ?? vaultSigner(d.vault);
+    this.readAhead = new ReadAhead(() => this.d.now());
   }
 
   // ── context helpers ───────────────────────────────────────────────────────
@@ -353,6 +358,35 @@ export class EngineCore {
 
   usdToWei(usd: number, nativeUsd: number): bigint {
     return parseEther((usd / nativeUsd).toFixed(18));
+  }
+
+  /**
+   * Each wallet's balance of `token` for the panel's sells, read now (0 where the read
+   * failed) and kept briefly, so a sell clicked next skips the read.
+   */
+  async readHeld(ctx: VenueCtx, token: Address, wallets: readonly Address[]): Promise<bigint[]> {
+    const at = this.d.now();
+    const balances = await readTokenBalances(ctx.client, token, wallets);
+    balances.forEach((b, i) => {
+      const wallet = wallets[i];
+      if (b !== null && wallet) this.readAhead.noteBalance(ctx.chain.id, token, wallet, b, at);
+    });
+    return balances.map((b) => b ?? 0n);
+  }
+
+  /**
+   * The reads made ahead for a sell (ReadAhead), or null while a transaction from the wallet
+   * on this chain is still out: its balance may change any moment.
+   */
+  ahead(chainId: number, walletId: string): ReadAhead | null {
+    for (const st of this.tickets.values()) {
+      if (st.ticket.chainId !== chainId) continue;
+      const out = st.ticket.legs.some(
+        (l) => l.walletId === walletId && (l.status === 'sending' || l.status === 'submitted'),
+      );
+      if (out) return null;
+    }
+    return this.readAhead;
   }
 
   // ── tickets ───────────────────────────────────────────────────────────────
@@ -593,6 +627,8 @@ export class EngineCore {
       leg.status = 'submitted';
       leg.hash = sent.hash;
       leg.nonce = sent.nonce;
+      // What was read of the wallet ahead no longer counts (ReadAhead).
+      this.readAhead.moved(p.chain.id, p.wallet.address);
       leg.sentMs = Math.max(0, tDone - st.startedAt);
       leg.phases = {
         prepMs: Math.max(0, tCheck - st.startedAt),
@@ -649,7 +685,11 @@ export class EngineCore {
         leg.status = receipt.status === 'success' ? 'confirmed' : 'failed';
         if (receipt.status !== 'success') leg.error = 'Reverted on-chain';
         const sent = st.sent.get(legIndex);
-        if (sent) leg.confirmMs = Math.max(0, this.d.now() - sent.sentAt);
+        if (sent) {
+          leg.confirmMs = Math.max(0, this.d.now() - sent.sentAt);
+          // It landed: what was read of the wallet before is out of date.
+          this.readAhead.moved(chain.id, sent.from);
+        }
         leg.feeWei = feePaid(receipt).toString();
         // A sell's native proceeds arrive in its final step when the pool is funded.
         const pays = leg.kind === 'swap' || (leg.kind === 'step' && st.ticket.kind === 'sell');
@@ -813,6 +853,7 @@ export class EngineCore {
       { kind: mode === 'cancel' ? 'empty' : 'replace' },
     );
     const hash = await this.d.broadcast(chain, cs, raw);
+    this.readAhead.moved(chain.id, sent.from);
     st.sent.set(idx, { ...sent, tx, gas, fees });
     leg.hash = hash;
     if (mode === 'cancel') leg.kind = 'cancel';
@@ -867,6 +908,7 @@ export class EngineCore {
       { kind: 'empty' },
     );
     await this.d.broadcast(chain, cs, raw);
+    this.readAhead.moved(chain.id, sent.from);
     // The local count may sit past the gap or before it: read it from the chain next time.
     this.d.nonces.reset(chain.id, sent.from);
     delete leg.waitingNonce;
@@ -986,9 +1028,11 @@ export class EngineCore {
       (n) => this.sign(wallet, chain.id, n, tx, gas, fees, undefined),
       (raw) => this.d.broadcast(chain, cs, raw),
     );
+    this.readAhead.moved(chain.id, wallet.address);
     const receipt = await ctx.client
       .waitForTransactionReceipt({ hash, timeout: 60_000 })
       .catch(() => null);
+    this.readAhead.moved(chain.id, wallet.address);
     return { hash, confirmed: receipt?.status === 'success' };
   }
 
