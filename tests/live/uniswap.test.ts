@@ -159,4 +159,34 @@ describe('Uniswap venue round trip (mainnet simulation, no funds)', () => {
     );
     expect(r.statuses, JSON.stringify(r)).toEqual(['success', 'success', 'success']);
   });
+
+  it('Elysium: USDC against WHYPE on v3', async () => {
+    const r = await roundTrip(
+      99901,
+      '0xb47c4C8F73F009CC0C0d3f92B388d13E293F0B65',
+      parseEther('0.05'),
+      (p) => p.label.includes('v3'),
+    );
+    expect(r.statuses, JSON.stringify(r)).toEqual(['success', 'success', 'success']);
+  });
+
+  it('Elysium: USDC via a native-HYPE v4 pool', async () => {
+    const r = await roundTrip(
+      99901,
+      '0xb47c4C8F73F009CC0C0d3f92B388d13E293F0B65',
+      parseEther('0.05'),
+      (p) => p.label.includes('v4'),
+    );
+    expect(r.statuses, JSON.stringify(r)).toEqual(['success', 'success', 'success']);
+  });
+
+  it('Elysium: KNTQ via a v4 pool found through the pool index', async () => {
+    const r = await roundTrip(
+      99901,
+      '0xe45a355d9e9cAd2aD85F2d03E3eE3102A036acF0',
+      parseEther('0.05'),
+      (p) => p.label.includes('v4'),
+    );
+    expect(r.statuses, JSON.stringify(r)).toEqual(['success', 'success', 'success']);
+  });
 });

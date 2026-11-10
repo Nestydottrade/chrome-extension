@@ -10,7 +10,7 @@ import { base, bsc, ethereum, robinhood } from '../src/shared/chains/definitions
 
 describe('chain registry', () => {
   it('loads the launch chains, without the archived Arbitrum', () => {
-    expect([...CHAINS.keys()].sort((a, b) => a - b)).toEqual([1, 56, 4663, 8453]);
+    expect([...CHAINS.keys()].sort((a, b) => a - b)).toEqual([1, 56, 4663, 8453, 99901]);
     expect(getChain(42161)).toBeUndefined();
   });
 

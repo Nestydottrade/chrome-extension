@@ -151,6 +151,29 @@ describe('launchpad curves round trip (mainnet simulation, no funds)', () => {
     if (!r) return t.skip();
     expect(r.statuses, JSON.stringify(r)).toEqual(['success', 'success', 'success']);
   });
+
+  it('Montra (Elysium): a v4 pool for life, through its router', async (t) => {
+    const r = await roundTrip(
+      'montra',
+      99901,
+      [
+        // Busy native-quoted launches (Montra pools never move, so these stay valid).
+        '0x5dcfb191f0cdb853bac3a6a4385e160e779e377f',
+        '0x32193afd14c53f12c45a4c04eca9f7ba98e3ec71',
+        '0x86f2f8c31e51ec5bba5d230d266b271a00dea53a',
+      ],
+      parseEther('0.05'),
+    );
+    if (!r) return t.skip();
+    expect(r.statuses, JSON.stringify(r)).toEqual(['success', 'success', 'success']);
+  });
+
+  it('Montra (Elysium): a KNTQ-quoted pool is left out', async () => {
+    const venue = launchpadVenues.find((v) => v.id === 'montra') as Venue;
+    const chain = getChain(99901)!;
+    const ctx: VenueCtx = { chain, client: pool.get(chain), now: Date.now };
+    expect(await venue.discover(ctx, '0x547a2a9c5af6e4372ead794e80eaf3f42dbbaaac')).toEqual([]);
+  });
 });
 
 /**

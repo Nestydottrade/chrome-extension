@@ -50,6 +50,7 @@ const CHAIN_DOT: Record<string, string> = {
   bsc: '#f0b90b',
   arbitrum: '#28a0f0',
   robinhood: '#c6f432',
+  elysium: '#97fce4',
 };
 
 const UI = "'Barlow', ui-sans-serif, system-ui, sans-serif";

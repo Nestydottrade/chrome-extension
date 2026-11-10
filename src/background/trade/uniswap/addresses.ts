@@ -59,6 +59,20 @@ export const UNISWAP: Record<number, UniswapDeployment> = {
     v4StateView: '0xF3334192D15450CdD385c8B70e03f9A6bD9E673b',
     v4Quoter: '0x8Dc178eFB8111BB0973Dd9d722ebeFF267c98F94',
   },
+  // Elysium: not in deployments.json yet. Found on-chain among the contracts Uniswap's
+  // deployer (0x2179a608…27b6) made there, each identified by its own getters (factory,
+  // WETH9, poolManager, the NFT names); the Universal Router is the one Montra's registry
+  // names, whose v4 swap takes minHopPriceX36 as encoded here.
+  99901: {
+    universalRouter: '0xA13f7611115752DEB2B13813BDDE16A5073e4b45',
+    v2Factory: '0xBbBcC62853a5fA27b93d6Bab3E6F7ce841E25Df2',
+    v3Factory: '0x1707327F626496A7b5b3872e7E4d2879Df7d7a9f',
+    v3QuoterV2: '0x204FAca1764B154221e35c0d20aBb3c525710498',
+    v4PoolManager: '0xE2e105d3F7209A9DA11f83cCf3E7398a753823F1',
+    v4PositionManager: '0x1d1C51b9d07fD27d36412A2b66CC23D19Eb3E518',
+    v4StateView: '0x27eD73aE0652fdCf71d6793412A7525f32bE9dfE',
+    v4Quoter: '0x379F556c5a748BD7Cc9baF0F7A344094Ac1814f5',
+  },
   // Arbitrum One: added purely as config to prove a new chain needs no code changes.
   42161: {
     universalRouter: '0x2d01411773c8C24805306E89A41F7855C3c4Fe65',

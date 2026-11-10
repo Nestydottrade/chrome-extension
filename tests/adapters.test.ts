@@ -33,6 +33,7 @@ describe('detect', () => {
     [`https://flap.sh/base/${T}`, { kind: 'unknown', chainId: 8453 }],
     [`https://zora.co/coin/base:${T}`, { kind: 'unknown', chainId: 8453 }],
     [`https://www.ponsfamily.com/launchpad/${T}`, { kind: 'unknown', chainId: 4663 }],
+    [`https://montramarkets.xyz/token/${T.toLowerCase()}`, { kind: 'unknown', chainId: 99901 }],
     [
       `https://axiom.trade/meme/${T}?chain=bnb`,
       { siteId: 'generic', kind: 'unknown', chainId: 56 },

@@ -157,6 +157,8 @@ const LAUNCHPAD_CHAINS: Record<string, number> = {
   'www.ponsfamily.com': 4663,
   'ponsfamily.com': 4663,
   'app.long.xyz': 4663,
+  'montramarkets.xyz': 99901,
+  'www.montramarkets.xyz': 99901,
   'www.thestonks.exchange': 8453,
   'launch.o1.exchange': 8453,
   'bankr.bot': 8453,

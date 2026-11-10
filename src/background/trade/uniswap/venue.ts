@@ -129,7 +129,7 @@ export type UniPool =
   | { kind: 'v3'; pool: Address; quote: Address; fee: number; via?: Via }
   | { kind: 'v4'; poolId: Hex; key: PoolKey; quote: Address; via?: Via };
 
-function poolIdOf(key: PoolKey): Hex {
+export function poolIdOf(key: PoolKey): Hex {
   return keccak256(
     encodeAbiParameters(POOL_KEY_PARAMS, [
       key.currency0,

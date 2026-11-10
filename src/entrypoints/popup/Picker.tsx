@@ -172,6 +172,7 @@ const CHAIN_MARKS: Record<number, { bg: string; fg: string; text: string }> = {
   8453: { bg: '#0052ff', fg: '#fff', text: 'B' },
   56: { bg: '#f0b90b', fg: '#1a1405', text: 'B' },
   4663: { bg: '#ccff00', fg: '#0c1400', text: 'R' },
+  99901: { bg: '#97fce4', fg: '#062a22', text: 'E' },
   42161: { bg: '#28a0f0', fg: '#fff', text: 'A' },
   [SOLANA_CHAIN_ID]: { bg: 'linear-gradient(135deg, #9945ff, #14f195)', fg: '#fff', text: 'S' },
 };

@@ -136,6 +136,40 @@ export const robinhood: ChainConfigInput = {
   },
 };
 
+export const elysium: ChainConfigInput = {
+  // Kinetiq's Elysium: an Arbitrum Orbit rollup settling to HyperEVM, gas in HYPE. Chain
+  // ID confirmed via eth_chainId (0x1863d). Unlike Arbitrum One, the sequencer orders each
+  // block by priority fee, and gas has no parent-chain part (a transfer estimates 21,000).
+  id: 99901,
+  key: 'elysium',
+  name: 'Elysium',
+  shortName: 'ELY',
+  aliases: ['elysium', 'ely'],
+  nativeCurrency: { name: 'HYPE', symbol: 'HYPE', decimals: 18 },
+  wrappedNative: '0xbA876237B0F021A6c6D852d6c26E107997cC5E81',
+  stablecoins: [
+    { address: '0xb47c4C8F73F009CC0C0d3f92B388d13E293F0B65', symbol: 'USDC', decimals: 6 },
+  ],
+  dexscreenerSlug: 'elysium',
+  // Kinetiq's public RPC hands transactions to the sequencer. Montra's own RPC is left
+  // out: it takes only Montra calls and posts them through the parent chain's inbox,
+  // so a second copy sent there would be dropped and count against the wallet.
+  rpcUrls: ['https://rpc.elysium.kinetiq.xyz'],
+  // Its pages sit at the root: /explorer/... only redirects there.
+  explorer: { name: 'Elysium Explorer', url: 'https://elysium.kinetiq.xyz' },
+  feeModel: 'eip1559',
+  mev: {
+    supported: false,
+    reason: 'Elysium is a rollup with one sequencer and no public mempool.',
+  },
+  quickBuyAmounts: ['0.05', '0.2', '0.5', '1'],
+  gasPresets: {
+    p1: { priorityFeeGwei: '0.01', maxFeeMultiplier: 1.5, slippageBps: 500 },
+    p2: { priorityFeeGwei: '0.05', maxFeeMultiplier: 2, slippageBps: 1000 },
+    p3: { priorityFeeGwei: '0.5', maxFeeMultiplier: 3, slippageBps: 2000 },
+  },
+};
+
 // Archived on 2026-11-03: left out of CHAIN_DEFINITIONS, so nothing shows or trades it.
 // Put it back in that list to bring it back; its Uniswap addresses and Kyber slug stay.
 export const arbitrum: ChainConfigInput = {
@@ -166,4 +200,10 @@ export const arbitrum: ChainConfigInput = {
   },
 };
 
-export const CHAIN_DEFINITIONS: readonly ChainConfigInput[] = [ethereum, base, bsc, robinhood];
+export const CHAIN_DEFINITIONS: readonly ChainConfigInput[] = [
+  ethereum,
+  base,
+  bsc,
+  robinhood,
+  elysium,
+];

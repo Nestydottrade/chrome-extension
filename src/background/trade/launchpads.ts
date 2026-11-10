@@ -19,7 +19,8 @@ import type {
   Venue,
   VenueCtx,
 } from './types';
-import { chainQuotes } from './uniswap/venue';
+import type { PoolKey } from './uniswap/codec';
+import { chainQuotes, poolIdOf } from './uniswap/venue';
 import { virtualsVenue } from './virtuals';
 import {
   isOwn,
@@ -810,7 +811,179 @@ const ponsVenue: Venue = {
   },
 };
 
-export const launchpadVenues: Venue[] = [fourVenue, flapVenue, ponsVenue, virtualsVenue];
+// ── Montra (Elysium) ─────────────────────────────────────────────────────────
+
+/**
+ * Montra has no curve: a coin trades for life in one Uniswap v4 pool carrying Montra's
+ * hook, its whole supply seeded as a single position. The hook takes the pool's fee (1 to
+ * 10%, more on buys in an anti-snipe window) inside the swap, and the token itself has
+ * no tax. Trades go through Montra's LaunchRouter: one exact-input swap with a minimum,
+ * a recipient and a deadline, native HYPE sent as value, a sale approved to the router.
+ * ABIs from Montra's published contracts; the flows were simulated against mainnet.
+ */
+export const MONTRA_FACTORY: Address = '0x38D3ef3A06D18fA3286Fb5dEAfe611be725fcD15';
+export const MONTRA_ROUTER: Address = '0xc6E9a8E1a99023B67067B8A3605403b8d7B3A157';
+/** The hooks Montra's registry lists (`hooks()`); a pool with any other hook is not Montra's. */
+export const MONTRA_HOOKS: readonly Address[] = ['0x6b1216A40B65c83e9c9e18a562C446697B8cf8EC'];
+const MONTRA_CHAIN = 99901;
+/** Every Montra key has the dynamic-fee flag (the hook sets the fee) and its quote's spacing. */
+const MONTRA_FEE = 0x800000;
+const MONTRA_SPACINGS = [200, 100, 60, 10, 1];
+const MAX_UINT128 = 2n ** 128n - 1n;
+const MAX_DEADLINE_S = 30 * 60;
+
+const montraTokenAbi = parseAbi([
+  'function factory() view returns (address)',
+  'function hook() view returns (address)',
+  'function poolId() view returns (bytes32)',
+  'function buyTaxRate() view returns (uint256)',
+  'function sellTaxRate() view returns (uint256)',
+]);
+const montraRouterAbi = parseAbi([
+  'function quoteExactIn((address currency0, address currency1, uint24 fee, int24 tickSpacing, address hooks) key, bool zeroForOne, uint128 amountIn) returns (uint256)',
+  'function swapExactIn(((address currency0, address currency1, uint24 fee, int24 tickSpacing, address hooks) key, bool zeroForOne, uint128 amountIn, uint128 minAmountOut, address recipient, uint256 deadline) s) payable returns (uint256)',
+]);
+
+interface MontraPool {
+  key: PoolKey;
+}
+
+const isMontraHook = (a: Address) => MONTRA_HOOKS.some((h) => isAddressEqual(h, a));
+
+const montraRule: ExtraContractRule = {
+  label: 'Montra router',
+  approvalSpender: true,
+  validate(tx, ctx) {
+    let call;
+    try {
+      call = decodeFunctionData({ abi: montraRouterAbi, data: tx.data });
+    } catch {
+      return [label('Montra call', 'Unknown function')];
+    }
+    if (call.functionName !== 'swapExactIn')
+      return [label(`Montra ${call.functionName}`, 'Not a trade')];
+    const [s] = call.args;
+    const buy = s.zeroForOne;
+    const l = buy ? 'Montra buy' : 'Montra sell';
+    if (!isMontraHook(s.key.hooks)) return [label(l, 'Not a Montra pool')];
+    if (!isAddressEqual(s.key.currency0, zeroAddress))
+      return [label(l, 'Pool is not paired with native')];
+    if (ctx.token && !isAddressEqual(s.key.currency1, ctx.token))
+      return [label(l, 'Pool is not the token being traded')];
+    if (!isOwn(ctx, s.recipient)) return [label(l, 'Recipient is not one of your wallets')];
+    if (s.minAmountOut === 0n) return [label(l, 'No minimum output (no slippage protection)')];
+    if (s.deadline < BigInt(ctx.nowS) || s.deadline > BigInt(ctx.nowS + MAX_DEADLINE_S))
+      return [label(l, 'Deadline out of range')];
+    if (buy && tx.value !== s.amountIn) return [label(l, 'Value does not match input')];
+    if (!buy && tx.value !== 0n) return [label(l, 'Sell must not carry native value')];
+    return [label(l)];
+  },
+};
+
+function montraSwap(ref: PoolRef, zeroForOne: boolean, p: BuyParams): TxDraft {
+  const { key } = ref.data as MontraPool;
+  return {
+    to: MONTRA_ROUTER,
+    data: encodeFunctionData({
+      abi: montraRouterAbi,
+      functionName: 'swapExactIn',
+      args: [
+        {
+          key,
+          zeroForOne,
+          amountIn: p.amountIn,
+          minAmountOut: p.minOut,
+          recipient: p.wallet,
+          deadline: p.deadline,
+        },
+      ],
+    }),
+    value: zeroForOne ? p.amountIn : 0n,
+  };
+}
+
+export const montraVenue: Venue = {
+  id: 'montra',
+  supports: (chainId) => chainId === MONTRA_CHAIN,
+  async discover(ctx, token) {
+    const r = await ctx.client.multicall({
+      allowFailure: true,
+      contracts: [
+        { address: token, abi: montraTokenAbi, functionName: 'factory' },
+        { address: token, abi: montraTokenAbi, functionName: 'hook' },
+        { address: token, abi: montraTokenAbi, functionName: 'poolId' },
+      ],
+    });
+    const [factory, hook, poolId] = r.map((x) => (x.status === 'success' ? x.result : null));
+    if (typeof factory !== 'string' || !isAddressEqual(factory as Address, MONTRA_FACTORY))
+      return [];
+    if (typeof hook !== 'string' || !isMontraHook(hook as Address)) return [];
+    if (typeof poolId !== 'string') return [];
+    // Native-quoted pools only: HYPE (address 0) is always currency0, and the key is
+    // proved by hashing it to the token's own pool id. A pool quoted in KNTQ would need
+    // a native ↔ KNTQ leg, and Elysium's deep ones are v4 pools, which legs leave out.
+    const key = MONTRA_SPACINGS.map((tickSpacing): PoolKey => ({
+      currency0: zeroAddress,
+      currency1: token,
+      fee: MONTRA_FEE,
+      tickSpacing,
+      hooks: hook as Address,
+    })).find((k) => poolIdOf(k) === poolId.toLowerCase());
+    if (!key) return [];
+    const data: MontraPool = { key };
+    return [
+      { venueId: 'montra', id: `montra:${poolId.toLowerCase()}`, label: 'Montra', token, data },
+    ];
+  },
+  async quote(ctx, ref, side, amounts) {
+    const { key } = ref.data as MontraPool;
+    const usable = amounts.map((a) => a > 0n && a <= MAX_UINT128);
+    const asked = amounts.filter((_, i) => usable[i]);
+    if (asked.length === 0) return amounts.map(() => null);
+    // quoteExactIn runs the swap inside the PoolManager and undoes it: not a view, so an
+    // eth_call. Its answer is what swapExactIn then pays, every fee included.
+    const r = await ctx.client.multicall({
+      allowFailure: true,
+      contracts: asked.map((a) => ({
+        address: MONTRA_ROUTER,
+        abi: montraRouterAbi,
+        functionName: 'quoteExactIn' as const,
+        args: [key, side === 'buy', a] as const,
+      })),
+    });
+    let next = 0;
+    return usable.map((ok) => {
+      if (!ok) return null;
+      const x = r[next++];
+      return x?.status === 'success' ? x.result : null;
+    });
+  },
+  buildBuy: (_ctx, ref, p) => montraSwap(ref, true, p),
+  buildSell: (_ctx, ref, p) => montraSwap(ref, false, p),
+  sellApproval: () => ({ spender: MONTRA_ROUTER, viaPermit2: false, router: MONTRA_ROUTER }),
+  async venueTax(ctx, ref) {
+    // The token reads its pool's rates in basis points, rounded up: a buy's is higher
+    // inside an anti-snipe window. The protocol's part is in both, as terminals show it.
+    const [buy, sell] = await ctx.client.multicall({
+      allowFailure: false,
+      contracts: [
+        { address: ref.token, abi: montraTokenAbi, functionName: 'buyTaxRate' },
+        { address: ref.token, abi: montraTokenAbi, functionName: 'sellTaxRate' },
+      ],
+    });
+    return { buyBps: Number(buy), sellBps: Number(sell) };
+  },
+  untaxedTransfers: true,
+  poolRules: () => [[MONTRA_ROUTER, montraRule]],
+};
+
+export const launchpadVenues: Venue[] = [
+  fourVenue,
+  flapVenue,
+  ponsVenue,
+  virtualsVenue,
+  montraVenue,
+];
 
 /** Static rules (none: launchpad rules come with the pool via Venue.poolRules). */
 export function launchpadRules(chainId: number): ReadonlyMap<string, ExtraContractRule> {
