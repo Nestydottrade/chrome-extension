@@ -455,6 +455,8 @@ export class EngineCore {
             : 'partial';
     }
     const b = st.ticket.bridge;
+    // A bridge is its deposit: a swap ahead of it that landed (bridgeVia) is no part of one.
+    if (b && st.ticket.status === 'partial') st.ticket.status = 'failed';
     if (b && st.ticket.status === 'done') {
       // The origin deposit confirmed; the bridge is done once Relay paid out.
       if (b.relayStatus === 'failure' || b.relayStatus === 'refund') st.ticket.status = 'failed';

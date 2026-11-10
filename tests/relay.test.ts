@@ -12,8 +12,10 @@ import {
   SOLANA_NATIVE,
   checkQuote,
   checkSolanaQuote,
+  checkTokenQuote,
   createRelayClient,
   relayRule,
+  relayTokenRule,
   type RelayQuote,
 } from '../src/background/trade/relay';
 import { validateTx } from '../src/background/trade/validator';
@@ -115,6 +117,83 @@ const params = {
   amount: AMOUNT,
 };
 
+/** Elysium's USDC: Relay holds no HYPE there, so bridges leave in it (bridgeVia). */
+const USDC_ELY: Address = '0xb47c4C8F73F009CC0C0d3f92B388d13E293F0B65';
+const USDC_IN = 36_000_000n;
+const tokenAbi = parseAbi([
+  'function depositErc20(address depositor, address token, uint256 amount, bytes32 id)',
+  'function approve(address spender, uint256 amount)',
+  'function transfer(address to, uint256 amount)',
+]);
+const depositErc20 = (depositor: Address = ME, token: Address = USDC_ELY, amount = USDC_IN) =>
+  encodeFunctionData({
+    abi: tokenAbi,
+    functionName: 'depositErc20',
+    args: [depositor, token, amount, ID],
+  });
+const approveOf = (spender: Address, amount: bigint) =>
+  encodeFunctionData({ abi: tokenAbi, functionName: 'approve', args: [spender, amount] });
+
+interface TokenOver extends Over {
+  /** Relay's approval step ahead of the deposit; false leaves it out. */
+  approval?:
+    | false
+    | {
+        id?: string;
+        kind?: string;
+        requestId?: string;
+        to?: Address;
+        data?: Hex;
+        value?: string;
+        chainId?: number;
+      };
+  to?: Address;
+  data?: Hex;
+  value?: bigint;
+  chainId?: number;
+}
+
+/** A USDC quote from Elysium to Base as Relay returns it: approve, then depositErc20. */
+function tokenQuote(over: TokenOver = {}): RelayQuote {
+  const q = relayQuote(
+    {
+      to: over.to ?? RELAY_DEPOSITORY,
+      data: over.data ?? depositErc20(),
+      value: String(over.value ?? 0n),
+      chainId: over.chainId ?? 99901,
+    },
+    { outChainId: 8453, ...over },
+    { amount: '11600000000000000', minimumAmount: '11542000000000000' },
+  );
+  if (over.approval === false) return q;
+  const a = over.approval ?? {};
+  const approve = {
+    id: a.id ?? 'approve',
+    kind: a.kind ?? 'transaction',
+    requestId: a.requestId ?? REQUEST_ID,
+    items: [
+      {
+        data: {
+          to: a.to ?? USDC_ELY,
+          data: a.data ?? approveOf(RELAY_DEPOSITORY, USDC_IN),
+          value: a.value ?? '0',
+          chainId: a.chainId ?? 99901,
+        },
+      },
+    ],
+  };
+  return { ...q, steps: [approve, ...q.steps] };
+}
+
+const tokenParams = {
+  user: ME,
+  recipient: MY_OTHER as string,
+  fromChainId: 99901,
+  toChainId: 8453,
+  token: USDC_ELY,
+  amount: USDC_IN,
+};
+
 describe('Relay quote checks', () => {
   it('accepts a single deposit for the requested amount and recipient', () => {
     const q = checkQuote(quote(), params);
@@ -172,6 +251,88 @@ describe('Relay quote checks', () => {
     );
     expect(() => checkQuote(quote({ ...toSol, outCurrency: NATIVE }), p)).toThrow(
       /not the native coin/,
+    );
+  });
+});
+
+describe('Relay token quote checks (bridgeVia)', () => {
+  it('accepts the exact approval and one deposit of the amount, built again by Nesty', () => {
+    const q = checkTokenQuote(tokenQuote(), tokenParams);
+    expect(q.tx).toEqual({ to: RELAY_DEPOSITORY, data: depositErc20(), value: 0n });
+    expect(q.token).toBe(USDC_ELY);
+    expect(q.amountIn).toBe(USDC_IN);
+    expect(q.amountOut).toBe(11_600_000_000_000_000n);
+    expect(q.minOut).toBe(11_542_000_000_000_000n);
+    expect(q.requestId).toBe(REQUEST_ID);
+    expect(q.statusPath).toBe(STATUS);
+  });
+
+  it('accepts the deposit alone, where the allowance is already there', () => {
+    expect(checkTokenQuote(tokenQuote({ approval: false }), tokenParams).tx.data).toBe(
+      depositErc20(),
+    );
+  });
+
+  it.each<[string, TokenOver, RegExp]>([
+    ['an approval of another token', { approval: { to: ATTACKER } }, /approves another token/],
+    [
+      'an approval for another spender',
+      { approval: { data: approveOf(ATTACKER, USDC_IN) } },
+      /not for the deposit/,
+    ],
+    [
+      'an approval above the amount',
+      { approval: { data: approveOf(RELAY_DEPOSITORY, USDC_IN + 1n) } },
+      /not for the deposit/,
+    ],
+    ['an approval with native value', { approval: { value: '1' } }, /not for the deposit/],
+    [
+      'a transfer in place of the approval',
+      {
+        approval: {
+          data: encodeFunctionData({
+            abi: tokenAbi,
+            functionName: 'transfer',
+            args: [ATTACKER, USDC_IN],
+          }),
+        },
+      },
+      /not an approve/,
+    ],
+    ['an approval on another chain', { approval: { chainId: 1 } }, /different chain/],
+    ['a lead step that is not the approval', { approval: { id: 'swap' } }, /unexpected steps/],
+    ['a lead step that is a signature', { approval: { kind: 'signature' } }, /unexpected steps/],
+    [
+      'a second request in the approval',
+      { approval: { requestId: `0x${'18'.repeat(32)}` } },
+      /two requests/,
+    ],
+    ['extra steps', { extraStep: true }, /unexpected steps/],
+    ['a deposit into another contract', { to: ATTACKER }, /unknown contract/],
+    ['a deposit on another chain', { chainId: 1 }, /different chain/],
+    ['native value with the token', { value: 1n }, /native value/],
+    ['a deposit credited to someone else', { data: depositErc20(ATTACKER) }, /not credited/],
+    ['a deposit of another token', { data: depositErc20(ME, ATTACKER) }, /another token/],
+    [
+      'a deposit of another amount',
+      { data: depositErc20(ME, USDC_ELY, USDC_IN - 1n) },
+      /value differs/,
+    ],
+    [
+      'a native deposit',
+      { data: encodeFunctionData({ abi, functionName: 'depositNative', args: [ME, ID] }) },
+      /not a token deposit/,
+    ],
+    ['bytes after the deposit', { data: `${depositErc20()}ff` }, /not a token deposit/],
+    ['a swapped recipient', { recipient: ATTACKER }, /recipient differs/],
+    ['a looser minimum than asked', { minOut: '11368000000000000' }, /more slippage/],
+  ])('rejects %s', (_name, over, err) => {
+    expect(() => checkTokenQuote(tokenQuote(over), tokenParams)).toThrow(err);
+  });
+
+  it('leaves the native check as strict as before: no approval step there', () => {
+    expect(() => checkQuote(tokenQuote(), { ...tokenParams, amount: 0n })).toThrow(
+      /unexpected steps/,
     );
   });
 });
@@ -333,6 +494,32 @@ describe('Relay client', () => {
     expect(q.depositId).toEqual(DEPOSIT_ID);
   });
 
+  it('asks for a token bridge in the token, paid out in the native coin', async () => {
+    const { relay, sent } = client(tokenQuote());
+    const q = await relay.quoteToken(tokenParams);
+    expect(sent[0]).toMatchObject({
+      user: ME,
+      recipient: MY_OTHER,
+      originChainId: 99901,
+      destinationChainId: 8453,
+      originCurrency: USDC_ELY,
+      destinationCurrency: NATIVE,
+      amount: USDC_IN.toString(),
+      tradeType: 'EXACT_INPUT',
+      slippageTolerance: String(BRIDGE_SLIPPAGE_BPS),
+    });
+    expect(q.tx.data).toBe(depositErc20());
+
+    const toSol = client(
+      tokenQuote({ outChainId: SOLANA_CHAIN_ID, outCurrency: SOLANA_NATIVE, recipient: SOL_ME }),
+    );
+    await toSol.relay.quoteToken({ ...tokenParams, toChainId: SOLANA_CHAIN_ID, recipient: SOL_ME });
+    expect(toSol.sent[0]).toMatchObject({
+      originCurrency: USDC_ELY,
+      destinationCurrency: SOLANA_NATIVE,
+    });
+  });
+
   it("reads the payout in the destination chain's own format", async () => {
     const SIG = '5'.repeat(87);
     const HASH = `0x${'cd'.repeat(32)}`;
@@ -378,5 +565,59 @@ describe('Relay validator rule', () => {
 
   it('applies the per-transaction limit', () => {
     expect(validateTx(deposit(ME, parseEther('1')), ctx).ok).toBe(false);
+  });
+});
+
+describe('Relay token validator rule (bridgeVia)', () => {
+  const chain = getChain(99901)!;
+  const ctx = (over: Partial<Parameters<typeof validateTx>[1]> = {}) => ({
+    chain,
+    from: ME,
+    ownWallets: [ME, MY_OTHER],
+    extraContracts: new Map([[RELAY_DEPOSITORY.toLowerCase(), relayTokenRule(USDC_ELY)]]),
+    maxValue: 0n,
+    nowS: 1_800_000_000,
+    ...over,
+  });
+  const approval = (spender: Address, amount: bigint) => ({
+    to: USDC_ELY,
+    data: approveOf(spender, amount),
+    value: 0n,
+  });
+  const deposit = (data: Hex, value = 0n) => ({ to: RELAY_DEPOSITORY, data, value });
+
+  it('allows the exact approval of the depository, and no more', () => {
+    const c = ctx({ token: USDC_ELY, maxApproval: USDC_IN });
+    expect(validateTx(approval(RELAY_DEPOSITORY, USDC_IN), c).ok).toBe(true);
+    expect(validateTx(approval(RELAY_DEPOSITORY, USDC_IN + 1n), c).ok).toBe(false);
+    expect(validateTx(approval(ATTACKER, USDC_IN), c).ok).toBe(false);
+  });
+
+  it('never lets the native bridge approve the depository or take a token', () => {
+    const c = ctx({
+      token: USDC_ELY,
+      maxApproval: USDC_IN,
+      extraContracts: new Map([[RELAY_DEPOSITORY.toLowerCase(), relayRule]]),
+    });
+    expect(validateTx(approval(RELAY_DEPOSITORY, USDC_IN), c).ok).toBe(false);
+    expect(validateTx(deposit(depositErc20()), c).ok).toBe(false);
+  });
+
+  it('allows a deposit of the token credited to the sender', () => {
+    expect(validateTx(deposit(depositErc20()), ctx()).ok).toBe(true);
+  });
+
+  it.each<[string, ReturnType<typeof deposit>]>([
+    ['credited to another own wallet', deposit(depositErc20(MY_OTHER))],
+    ['credited to someone else', deposit(depositErc20(ATTACKER))],
+    ['of another token', deposit(depositErc20(ME, ATTACKER))],
+    ['of nothing', deposit(depositErc20(ME, USDC_ELY, 0n))],
+    ['with native value', deposit(depositErc20(), 1n)],
+    [
+      'of the native coin',
+      deposit(encodeFunctionData({ abi, functionName: 'depositNative', args: [ME, ID] }), 1n),
+    ],
+  ])('blocks a deposit %s', (_name, tx) => {
+    expect(validateTx(tx, ctx({ maxValue: parseEther('1') })).ok).toBe(false);
   });
 });

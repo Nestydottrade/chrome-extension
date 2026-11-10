@@ -1,12 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import {
   CHAINS,
+  bridgeAsset,
   buildChainRegistry,
   explorerTxUrl,
   findChainByAlias,
   getChain,
 } from '../src/shared/chains';
-import { base, bsc, ethereum, robinhood } from '../src/shared/chains/definitions';
+import { base, bsc, elysium, ethereum, robinhood } from '../src/shared/chains/definitions';
+import { bridgeGasReserve } from '../src/shared/networks';
 
 describe('chain registry', () => {
   it('loads the launch chains, without the archived Arbitrum', () => {
@@ -41,6 +43,20 @@ describe('chain registry', () => {
     expect(() => buildChainRegistry([ethereum, { ...base, id: 1 }])).toThrow(/duplicate chain id/);
     expect(() => buildChainRegistry([bsc, { ...robinhood, aliases: ['bnb'] }])).toThrow(
       /duplicate chain alias/,
+    );
+  });
+
+  it('bridges out of Elysium in its USDC, and every other chain in its own coin', () => {
+    expect(bridgeAsset(getChain(99901)!)).toMatchObject({ symbol: 'USDC', decimals: 6 });
+    for (const id of [1, 56, 4663, 8453]) expect(bridgeAsset(getChain(id)!)).toBeUndefined();
+    // Three transactions there (swap, approval, deposit): more gas kept back by MAX.
+    expect(bridgeGasReserve(99901)).toBe(5n * bridgeGasReserve(8453));
+    expect(bridgeGasReserve(1)).toBeGreaterThan(bridgeGasReserve(8453));
+  });
+
+  it("refuses a bridge asset that is not one of the chain's stablecoins", () => {
+    expect(() => buildChainRegistry([{ ...elysium, bridgeVia: elysium.wrappedNative }])).toThrow(
+      /bridge asset of elysium/,
     );
   });
 

@@ -150,6 +150,9 @@ export const elysium: ChainConfigInput = {
   stablecoins: [
     { address: '0xb47c4C8F73F009CC0C0d3f92B388d13E293F0B65', symbol: 'USDC', decimals: 6 },
   ],
+  // Relay holds no HYPE here, only USDC (its own quote for HYPE runs a swap through its
+  // router): a bridge out swaps HYPE into USDC on Uniswap first, then deposits the USDC.
+  bridgeVia: '0xb47c4C8F73F009CC0C0d3f92B388d13E293F0B65',
   dexscreenerSlug: 'elysium',
   // Kinetiq's public RPC hands transactions to the sequencer. Montra's own RPC is left
   // out: it takes only Montra calls and posts them through the parent chain's inbox,

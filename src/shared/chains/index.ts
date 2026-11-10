@@ -14,6 +14,8 @@ export function buildChainRegistry(
   for (const def of defs) {
     const chain = ChainConfigSchema.parse(def);
     if (byId.has(chain.id)) throw new Error(`duplicate chain id ${chain.id}`);
+    if (chain.bridgeVia && !bridgeAsset(chain))
+      throw new Error(`bridge asset of ${chain.key} is not one of its stablecoins`);
     if (keys.has(chain.key)) throw new Error(`duplicate chain key ${chain.key}`);
     for (const alias of chain.aliases) {
       if (aliases.has(alias)) throw new Error(`duplicate chain alias ${alias}`);
@@ -29,6 +31,15 @@ export const CHAINS: ReadonlyMap<number, ChainConfig> = buildChainRegistry(CHAIN
 
 export function getChain(id: number): ChainConfig | undefined {
   return CHAINS.get(id);
+}
+
+/**
+ * The stablecoin bridges from `chain` leave in (`bridgeVia`), or undefined where they take
+ * the chain's own coin.
+ */
+export function bridgeAsset(chain: ChainConfig): ChainConfig['stablecoins'][number] | undefined {
+  const via = chain.bridgeVia;
+  return via ? chain.stablecoins.find((s) => s.address === via) : undefined;
 }
 
 /** Resolves a URL slug such as "bsc" or "eth" to a chain. Case-insensitive. */

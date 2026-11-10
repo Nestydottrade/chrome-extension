@@ -129,6 +129,7 @@ describe('Bridging from Solana', () => {
     const asked: unknown[] = [];
     const relay: RelayClient = {
       quote: () => Promise.reject(new Error('EVM only')),
+      quoteToken: () => Promise.reject(new Error('EVM only')),
       quoteFromSolana: async (p): Promise<SolBridgeQuote> => {
         asked.push(p);
         return {

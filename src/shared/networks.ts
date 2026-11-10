@@ -1,4 +1,5 @@
-import { chainLabel, getChain } from './chains';
+import { parseEther } from 'viem';
+import { bridgeAsset, chainLabel, getChain } from './chains';
 import { SOLANA, isSolana } from './solana';
 
 /**
@@ -35,6 +36,22 @@ export function explorerUrl(chainId: number): string {
 /** A transaction: its EVM hash, or a Solana signature. */
 export function txUrl(chainId: number, hashOrSig: string): string {
   return `${explorerUrl(chainId)}/tx/${hashOrSig}`;
+}
+
+/**
+ * Native kept back by a bridge's MAX on an EVM chain for gas: one deposit, or three
+ * transactions (swap, approval, deposit) where bridges leave in a token (bridgeVia).
+ * Solana works its own reserve out.
+ */
+export function bridgeGasReserve(chainId: number): bigint {
+  const one =
+    chainId === 1
+      ? parseEther('0.002')
+      : chainId === 56
+        ? parseEther('0.0005')
+        : parseEther('0.0002');
+  const chain = getChain(chainId);
+  return chain && bridgeAsset(chain) ? one * 5n : one;
 }
 
 export function tokenUrl(chainId: number, token: string): string {

@@ -1,5 +1,7 @@
 import {
   decodeFunctionData,
+  encodeFunctionData,
+  erc20Abi,
   getAddress,
   isAddressEqual,
   parseAbi,
@@ -25,8 +27,10 @@ import {
  *
  * On EVM chains the depository is the same CREATE2 address on every supported chain
  * (identical bytecode checked on all five) and its source is verified on Basescan. The only
- * call Nesty makes to it is depositNative(depositor, id). On Solana it is Relay's
- * depository program, and the only instruction is deposit_native (see solana/relay.ts).
+ * call Nesty makes to it is depositNative(depositor, id), or on a chain whose coin Relay
+ * does not hold (bridgeVia), depositErc20(depositor, token, amount, id) after an exact
+ * approval. On Solana it is Relay's depository program, and the only instruction is
+ * deposit_native (see solana/relay.ts).
  */
 const RELAY_API = 'https://api.relay.link';
 export const RELAY_DEPOSITORY: Address = getAddress('0x4cd00e387622c35bddb9b4c962c136462338bc31');
@@ -52,6 +56,9 @@ const SOL_SIGNATURE = /^[1-9A-HJ-NP-Za-km-z]{64,88}$/;
 const STATUS_PATH = /^\/intents\/status(?:\/v\d)?\?requestId=(0x[0-9a-fA-F]{64})$/;
 
 const depositoryAbi = parseAbi(['function depositNative(address depositor, bytes32 id) payable']);
+const depositoryTokenAbi = parseAbi([
+  'function depositErc20(address depositor, address token, uint256 amount, bytes32 id)',
+]);
 
 const EvmTxData = z.object({
   to: z.string(),
@@ -120,6 +127,15 @@ export interface BridgeQuote extends QuoteTerms {
   tx: { to: Address; data: Hex; value: bigint };
 }
 
+/**
+ * From an EVM chain in one of its tokens (bridgeVia): the deposit of exactly `amountIn` of
+ * `token`, which needs the depository's allowance for it first. Nesty approves itself.
+ */
+export interface TokenBridgeQuote extends QuoteTerms {
+  token: Address;
+  tx: { to: Address; data: Hex; value: bigint };
+}
+
 /** From Solana: the deposit's id; the instruction is built around it (relayDepositNative). */
 export interface SolBridgeQuote extends QuoteTerms {
   depositId: Uint8Array;
@@ -136,6 +152,15 @@ export interface RelayClient {
     toChainId: number;
     amount: bigint;
   }): Promise<BridgeQuote>;
+  /** From an EVM chain in `token`, its bridge asset (bridgeVia), to another or to Solana. */
+  quoteToken(p: {
+    user: Address;
+    recipient: string;
+    fromChainId: number;
+    toChainId: number;
+    token: Address;
+    amount: bigint;
+  }): Promise<TokenBridgeQuote>;
   /** From Solana, to an EVM chain. */
   quoteFromSolana(p: {
     user: SolAddress;
@@ -199,6 +224,18 @@ export function createRelayClient(fetchFn: typeof fetch = fetch): RelayClient {
       });
       return checkQuote(q, p);
     },
+    async quoteToken(p) {
+      const q = await quote({
+        user: p.user,
+        recipient: p.recipient,
+        originChainId: p.fromChainId,
+        destinationChainId: p.toChainId,
+        originCurrency: p.token,
+        destinationCurrency: isSolana(p.toChainId) ? SOLANA_NATIVE : NATIVE,
+        amount: p.amount.toString(),
+      });
+      return checkTokenQuote(q, p);
+    },
     async quoteFromSolana(p) {
       const q = await quote({
         user: p.user,
@@ -223,18 +260,25 @@ export function createRelayClient(fetchFn: typeof fetch = fetch): RelayClient {
   };
 }
 
+type QuoteItem = RelayQuote['steps'][number]['items'][number];
+
 /**
- * What both directions check: one transaction step, the recipient we asked for, the native
- * coin of the destination chain paid out, and no more slippage than we asked for.
+ * What every direction checks: one transaction step, the recipient we asked for, the native
+ * coin of the destination chain paid out, and no more slippage than we asked for. A token
+ * deposit (`approval`) may come after Relay's approval step, returned for its own checks.
  */
 function checkTerms(
   q: RelayQuote,
   p: { recipient: string; toChainId: number; amount: bigint },
-): { item: RelayQuote['steps'][number]['items'][number]; terms: QuoteTerms } {
-  const items = q.steps.flatMap((s) => s.items.map((i) => ({ step: s, item: i })));
-  if (q.steps.length !== 1 || items.length !== 1)
+  approval = false,
+): { item: QuoteItem; terms: QuoteTerms; approve: QuoteItem | null } {
+  const lead = approval && q.steps.length === 2 ? q.steps[0] : undefined;
+  const step = q.steps[q.steps.length - 1];
+  if (!step || q.steps.length !== (lead ? 2 : 1) || q.steps.some((s) => s.items.length !== 1))
     throw new RelayError('Quote has unexpected steps');
-  const { step, item } = items[0] as (typeof items)[number];
+  if (lead && (lead.id !== 'approve' || lead.kind !== 'transaction'))
+    throw new RelayError('Quote has unexpected steps');
+  const item = step.items[0] as QuoteItem;
   if (step.kind !== 'transaction') throw new RelayError('Quote step is not a transaction');
 
   const toSolana = isSolana(p.toChainId);
@@ -265,8 +309,9 @@ function checkTerms(
   if (endpoint && !fromPath) throw new RelayError('Unexpected status path');
   const requestId = fromPath ?? step.requestId;
   if (!requestId || !BYTES32.test(requestId)) throw new RelayError('Quote has no request id');
-  if (step.requestId !== undefined && step.requestId.toLowerCase() !== requestId.toLowerCase())
-    throw new RelayError('Quote names two requests');
+  for (const s of [lead, step])
+    if (s?.requestId !== undefined && s.requestId.toLowerCase() !== requestId.toLowerCase())
+      throw new RelayError('Quote names two requests');
 
   // Relay lists sub-fees (relayerGas, relayerService) next to their totals; add the
   // two top-level ones: origin gas + relayer.
@@ -276,6 +321,7 @@ function checkTerms(
       : null;
   return {
     item,
+    approve: lead ? (lead.items[0] as QuoteItem) : null,
     terms: {
       amountIn: p.amount,
       amountOut,
@@ -315,6 +361,72 @@ export function checkQuote(
   if (!isAddressEqual(depositor, p.user))
     throw new RelayError('Deposit is not credited to your wallet');
   return { ...terms, tx: { to: RELAY_DEPOSITORY, data: d.data as Hex, value: BigInt(d.value) } };
+}
+
+/**
+ * From an EVM chain in a token (bridgeVia). Accepts only Relay's approval step, if there is
+ * one, of exactly the amount to the depository; then one deposit on the origin chain, into
+ * the depository, of exactly that amount of `token`, credited to our own wallet. The deposit
+ * is built again by Nesty around the quoted id and must match the quote's to the byte.
+ */
+export function checkTokenQuote(
+  q: RelayQuote,
+  p: {
+    user: Address;
+    recipient: string;
+    fromChainId: number;
+    toChainId: number;
+    token: Address;
+    amount: bigint;
+  },
+): TokenBridgeQuote {
+  const { item, terms, approve } = checkTerms(q, p, true);
+  if (approve) {
+    const a = approve.data;
+    if ('instructions' in a || a.chainId !== p.fromChainId)
+      throw new RelayError('Quote is for a different chain');
+    if (!EVM_ADDRESS.test(a.to) || !isAddressEqual(a.to as Address, p.token))
+      throw new RelayError('Quote approves another token');
+    let call;
+    try {
+      call = decodeFunctionData({ abi: erc20Abi, data: a.data as Hex });
+    } catch {
+      throw new RelayError('Quote approval is not an approve');
+    }
+    if (call.functionName !== 'approve') throw new RelayError('Quote approval is not an approve');
+    const [spender, allowed] = call.args;
+    if (
+      !isAddressEqual(spender, RELAY_DEPOSITORY) ||
+      allowed !== p.amount ||
+      BigInt(a.value) !== 0n
+    )
+      throw new RelayError('Quote approval is not for the deposit');
+  }
+  const d = item.data;
+  if ('instructions' in d || d.chainId !== p.fromChainId)
+    throw new RelayError('Quote is for a different chain');
+  if (!EVM_ADDRESS.test(d.to) || !isAddressEqual(d.to as Address, RELAY_DEPOSITORY))
+    throw new RelayError('Quote targets an unknown contract');
+  if (BigInt(d.value) !== 0n) throw new RelayError('Quote sends native value with a token deposit');
+  let call;
+  try {
+    call = decodeFunctionData({ abi: depositoryTokenAbi, data: d.data as Hex });
+  } catch {
+    throw new RelayError('Quote calldata is not a token deposit');
+  }
+  const [depositor, token, amount, id] = call.args;
+  if (!isAddressEqual(depositor, p.user))
+    throw new RelayError('Deposit is not credited to your wallet');
+  if (!isAddressEqual(token, p.token)) throw new RelayError('Quote deposits another token');
+  if (amount !== p.amount) throw new RelayError('Quote value differs from the amount');
+  const data = encodeFunctionData({
+    abi: depositoryTokenAbi,
+    functionName: 'depositErc20',
+    args: [p.user, p.token, p.amount, id],
+  });
+  if (data.toLowerCase() !== d.data.toLowerCase())
+    throw new RelayError('Quote calldata is not a token deposit');
+  return { ...terms, token: p.token, tx: { to: RELAY_DEPOSITORY, data, value: 0n } };
 }
 
 /** Bytes from hex, with or without 0x; null when it is not hex. */
@@ -383,6 +495,36 @@ export const relayRule: ExtraContractRule = {
     return [{ label, ok: true }];
   },
 };
+
+/**
+ * Validator rule for the depository in a bridge that leaves in `token` (bridgeVia): it may
+ * be approved for the token (approvals stay bounded by the amount), and its only call is
+ * depositErc20 of that token, credited to the sending wallet, with no native value.
+ */
+export function relayTokenRule(token: Address): ExtraContractRule {
+  return {
+    label: 'Bridge',
+    approvalSpender: true,
+    validate(tx: TxToValidate, ctx: ValidationContext): BlockedAction[] {
+      let call;
+      try {
+        call = decodeFunctionData({ abi: depositoryTokenAbi, data: tx.data });
+      } catch {
+        return [{ label: 'Bridge call', ok: false, reason: 'Only token deposits are allowed' }];
+      }
+      const [depositor, asset, amount] = call.args;
+      const label = `Bridge deposit for ${depositor.slice(0, 6)}…`;
+      if (!isOwn(ctx, depositor) || !isAddressEqual(depositor, ctx.from))
+        return [{ label, ok: false, reason: 'Deposit is not credited to the sending wallet' }];
+      if (!isAddressEqual(asset, token))
+        return [{ label, ok: false, reason: 'Deposit is in another token' }];
+      if (amount === 0n) return [{ label, ok: false, reason: 'Empty deposit' }];
+      if (tx.value !== 0n)
+        return [{ label, ok: false, reason: 'A token deposit must not carry native value' }];
+      return [{ label, ok: true }];
+    },
+  };
+}
 
 /**
  * Follows a bridge once its deposit landed: asks Relay until the payout is filled, refunded

@@ -1,7 +1,8 @@
 import { base58 } from '@scure/base';
-import { parseEther } from 'viem';
+import { encodeFunctionData, parseEther } from 'viem';
 import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts';
 import { describe, expect, it } from 'vitest';
+import { erc20Abi } from '../../src/background/chain/abis';
 import { ClientPool } from '../../src/background/chain/client';
 import { SYSTEM_PROGRAM } from '../../src/background/solana/address';
 import {
@@ -13,8 +14,20 @@ import { SolRpc } from '../../src/background/solana/rpc';
 import { setComputeUnitLimit, setComputeUnitPrice } from '../../src/background/solana/spl';
 import { compileMessage, serializeTransaction } from '../../src/background/solana/tx';
 import { validateRelayDeposit } from '../../src/background/solana/validator';
-import { createRelayClient } from '../../src/background/trade/relay';
-import { getChain } from '../../src/shared/chains';
+import { validationContext } from '../../src/background/trade/engine/core';
+import { minOutAfter } from '../../src/background/trade/engine/trading';
+import { launchpadRules, launchpadVenues } from '../../src/background/trade/launchpads';
+import {
+  RELAY_DEPOSITORY,
+  createRelayClient,
+  relayTokenRule,
+} from '../../src/background/trade/relay';
+import { Routing } from '../../src/background/trade/routing';
+import { buildTx, type VenueCtx } from '../../src/background/trade/types';
+import { uniswapVenue } from '../../src/background/trade/uniswap/venue';
+import { validateTx } from '../../src/background/trade/validator';
+import { extraVenues, venueRules } from '../../src/background/trade/venues';
+import { bridgeAsset, getChain } from '../../src/shared/chains';
 import { SOLANA, SOLANA_CHAIN_ID } from '../../src/shared/solana';
 
 /** Real Relay quotes, checked by checkQuote(), and the deposit simulated (no funds). */
@@ -66,6 +79,94 @@ describe('Relay bridge (live quote + simulated deposit)', () => {
       expect(result?.status, JSON.stringify(result?.error?.message ?? '')).toBe('success');
     });
   }
+});
+
+describe('Relay bridge out of Elysium in USDC (live quotes + simulated swap, approval, deposit)', () => {
+  it('99901 → 8453: HYPE into USDC on the best pool, then the exact approval and the deposit', async () => {
+    const chain = getChain(99901)!;
+    const via = bridgeAsset(chain)!;
+    const ctx: VenueCtx = { chain, client: pool.get(chain), now: Date.now };
+    const routing = new Routing([uniswapVenue, ...extraVenues, ...launchpadVenues]);
+    const amount = parseEther('0.5');
+    const [route] = await routing.best(ctx, via.address, 'buy', [amount], { own: true });
+    if (!route) throw new Error('no HYPE → USDC pool');
+    const me = evmWallet();
+    // What the flow deposits is what arrived; the swap's least is what is sure to.
+    const minOut = minOutAfter(route.out, 0, 100);
+    const swap = await buildTx(route.venue, ctx, route.pool, 'buy', {
+      wallet: me,
+      amountIn: amount,
+      minOut,
+      deadline: BigInt(Math.floor(Date.now() / 1000) + 600),
+    });
+    const q = await relay.quoteToken({
+      user: me,
+      recipient: me,
+      fromChainId: 99901,
+      toChainId: 8453,
+      token: via.address,
+      amount: minOut,
+    });
+    expect(q.minOut).toBeGreaterThan(0n);
+    expect(q.minOut).toBeLessThanOrEqual(q.amountOut);
+
+    // Each passes the validator as the flow builds it.
+    const d = {
+      extraContracts: (id: number) => new Map([...venueRules(id), ...launchpadRules(id)]),
+      routing,
+      now: Date.now,
+    };
+    const rules = new Map([
+      ...d.extraContracts(chain.id),
+      [RELAY_DEPOSITORY.toLowerCase(), relayTokenRule(via.address)],
+    ]);
+    const approve = {
+      to: via.address,
+      data: encodeFunctionData({
+        abi: erc20Abi,
+        functionName: 'approve',
+        args: [RELAY_DEPOSITORY, minOut],
+      }),
+      value: 0n,
+    };
+    const checks = [
+      validateTx(
+        swap,
+        validationContext(
+          d,
+          chain,
+          me,
+          [me],
+          { token: via.address, maxValue: amount },
+          { ctx, venueId: route.venue.id, pool: route.pool },
+        ),
+      ),
+      validateTx(
+        approve,
+        validationContext(d, chain, me, [me], {
+          token: via.address,
+          maxApproval: minOut,
+          maxValue: 0n,
+          extraContracts: rules,
+        }),
+      ),
+      validateTx(
+        q.tx,
+        validationContext(d, chain, me, [me], { maxValue: 0n, extraContracts: rules }),
+      ),
+    ];
+    expect(checks.flatMap((c) => c.actions.filter((a) => !a.ok))).toEqual([]);
+
+    const sim = await ctx.client.simulateCalls({
+      account: me,
+      stateOverrides: [{ address: me, balance: parseEther('2') }],
+      calls: [swap, approve, q.tx],
+    });
+    expect(
+      sim.results.map((r) => r.status),
+      JSON.stringify(sim.results.map((r) => r.error?.message ?? '')),
+    ).toEqual(['success', 'success', 'success']);
+  });
 });
 
 /**

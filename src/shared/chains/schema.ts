@@ -68,6 +68,12 @@ export const ChainConfigSchema = z.object({
    * deployed; there such trades take separate transactions.
    */
   nestyRouter: AddressSchema.optional(),
+  /**
+   * One of `stablecoins` that bridges from this chain leave in, where the bridge (Relay)
+   * holds none of the chain's own coin. The coin is swapped into it first. Unset where
+   * bridges take the coin itself.
+   */
+  bridgeVia: AddressSchema.optional(),
   /** Chain slug on api.dexscreener.com (used only as a fallback to resolve v4 pool ids). */
   dexscreenerSlug: z.string().regex(/^[a-z0-9-]+$/),
   rpcUrls: z.array(HttpsUrl).min(1),

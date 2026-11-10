@@ -56,7 +56,9 @@ export function statusOf(t: TradeTicket): { text: string; cls: string } {
     if (t.status === 'failed' || t.status === 'blocked')
       return { text: s === 'refund' ? 'Refunded' : 'Failed', cls: 'bad' };
     if (s === 'success') return { text: 'Completed', cls: 'ok' };
-    return { text: done ? 'Bridging' : 'Pending', cls: 'pend' };
+    // Bridging once the deposit itself landed, not a swap ahead of it.
+    const deposited = t.legs.some((l) => l.kind === 'bridge' && l.status === 'confirmed');
+    return { text: deposited ? 'Bridging' : 'Pending', cls: 'pend' };
   }
   switch (t.status) {
     case 'done':

@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useState } from 'preact/hooks';
-import { formatUnits, getAddress, isAddress, parseEther, parseUnits, type Address } from 'viem';
+import { formatUnits, getAddress, isAddress, parseUnits, type Address } from 'viem';
 import { browser } from 'wxt/browser';
 import { CHAINS } from '../../shared/chains';
 import { formatCompact, formatUsd, parseDecimalInput } from '../../shared/format';
 import type { BridgeQuoteView, PushEvent } from '../../shared/messages';
-import { nativeSymbol, networkName } from '../../shared/networks';
+import { bridgeGasReserve, nativeSymbol, networkName } from '../../shared/networks';
 import type { TradeTicket } from '../../shared/panel';
 import {
   SOLANA,
@@ -20,13 +20,6 @@ import { statusOf } from './Activity';
 import { IconSwap } from './icons';
 import { ChainMark, Picker } from './Picker';
 import { txUrl } from './links';
-
-/** Kept back by MAX on EVM chains so the deposit transaction itself can pay gas. */
-function gasReserve(chainId: number): bigint {
-  if (chainId === 1) return parseEther('0.002');
-  if (chainId === 56) return parseEther('0.0005');
-  return parseEther('0.0002');
-}
 
 /** Relay's refusals arrive as no_route, whose usual wording is about a token's liquidity. */
 const bridgeError = (r: Parameters<typeof errorText>[0]) =>
@@ -265,7 +258,7 @@ export function Bridge({
       else setError(errorText(r));
       return;
     }
-    const v = balance - gasReserve(fromChain);
+    const v = balance - bridgeGasReserve(fromChain);
     setAmount(v > 0n ? formatUnits(v, fromDecimals) : '0');
   };
 
@@ -358,7 +351,9 @@ export function Bridge({
   );
 
   const st = ticket ? statusOf(ticket) : null;
-  const deposit = ticket?.legs.map((l) => l.hash ?? l.sig).find((h) => h !== undefined);
+  // The deposit leg itself: a bridge that swaps first has the swap's hash before it.
+  const depositLeg = ticket?.legs.find((l) => l.kind === 'bridge');
+  const deposit = depositLeg?.hash ?? depositLeg?.sig;
   // Keys imported from one family have no address on the other.
   const missing = fromUsable.length === 0 ? fromChain : null;
 
