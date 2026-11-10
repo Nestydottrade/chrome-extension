@@ -109,6 +109,14 @@ const V4_STANDARD: [number, number][] = [
   [3000, 60],
   [10000, 200],
 ];
+/**
+ * The highest fixed fee a v4 pool may charge to be traded through, in hundredths of a basis
+ * point (10%). Anyone can open a v4 pool with any fee up to 100%, and the pool index lists
+ * it: one far above every real tier is a trap (an Elysium coin's only native pool charged
+ * 84.369% with a few dollars in it), and as a coin's only pool its quote, fee and all,
+ * would still be the best route. A dynamic fee is the hook's to set, and quotes include it.
+ */
+const MAX_FIXED_FEE = 100_000;
 const POOL_KEY_PARAMS = parseAbiParameters('address, address, uint24, int24, address');
 
 /**
@@ -401,6 +409,7 @@ async function discover(ctx: VenueCtx, token: Address): Promise<PoolRef<UniPool>
     if (key && !keys.has(id)) keys.set(id, key);
   }
   const v4Candidates = [...keys.entries()]
+    .filter(([, key]) => (key.fee & DYNAMIC_FEE) !== 0 || key.fee <= MAX_FIXED_FEE)
     .map(([poolId, key]) => ({ poolId, key, quote: v4QuoteSide(key, token, weth, stables) }))
     .filter((c): c is { poolId: Hex; key: PoolKey; quote: Address } => c.quote !== null);
 
