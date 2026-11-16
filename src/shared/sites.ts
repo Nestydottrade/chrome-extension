@@ -48,6 +48,8 @@ export const API_HOSTS: string[] = [
   ),
   // Solana RPCs (balances, quotes, sending).
   ...SOLANA.rpcUrls.map((u) => `${new URL(u).origin}/*`),
+  // Solana's block engines (MEV protection's private sends).
+  ...SOLANA.blockEngines.map((u) => `${new URL(u).origin}/*`),
 ];
 
 /** True when `origin` (e.g. "https://gmgn.ai") is covered by a built-in site. */

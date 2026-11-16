@@ -87,7 +87,7 @@ export const panelApi = {
       ? send({ type: 'sol.trade.sell', mint: t.mint, ...a })
       : send({ type: 'trade.sell', chainId: t.chainId, token: t.token, ...a }),
 
-  /** Solana keeps only what applies there: no MEV, tax limit or gwei. */
+  /** Solana keeps only what applies there: no tax limit or gwei; MEV is set in Settings. */
   setTrade: (t: TargetRef, patch: SavedTradePatch) => {
     const { quickBuyUsd, ...evm } = patch;
     if (t.kind !== 'solana')

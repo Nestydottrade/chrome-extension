@@ -1,5 +1,6 @@
 import type { SolAddress } from '../../shared/solana';
 import { dexModule, type DexVenue } from './dex';
+import { tipPaid } from './jito';
 import {
   bondingCurveAddress,
   buyInstructions,
@@ -225,7 +226,8 @@ export function tradeDelivered(
   const unwrapped =
     wsolAt >= 0 ? (meta.preBalances[wsolAt] ?? 0n) - (meta.postBalances[wsolAt] ?? 0n) : 0n;
   const delta = (meta.postBalances[at] ?? 0n) - (meta.preBalances[at] ?? 0n);
-  return delta + meta.fee - unwrapped;
+  // The network fee and any tip to the block engine are what it cost, not what it paid.
+  return delta + meta.fee + tipPaid(meta) - unwrapped;
 }
 
 /** Why a buy is quoted nothing, when more can be said than that no route fills it. */

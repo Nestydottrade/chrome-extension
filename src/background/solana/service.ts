@@ -23,7 +23,13 @@ import {
   type TradePrefs,
 } from '../../shared/settings/defaults';
 import type { SolanaTarget } from '../../shared/detection';
-import { SOLANA, SOLANA_CHAIN_ID, isSolAddress, type SolAddress } from '../../shared/solana';
+import {
+  SOLANA,
+  SOLANA_CHAIN_ID,
+  isSolAddress,
+  tipLamports,
+  type SolAddress,
+} from '../../shared/solana';
 import type { WalletAccount } from '../../shared/wallet';
 import type { HistoryStore } from '../history';
 import { DUST_USD } from '../portfolio';
@@ -50,6 +56,7 @@ import {
   seed,
 } from './address';
 import { explainError } from './errors';
+import { anyTipAccount, tipInstruction, tipPaid, type PrivateSender } from './jito';
 import { signMessage, publicKeyOf } from './keys';
 import { EXT, decodeMetaplexMetadata, decodeMint, decodeTokenAccount } from './layouts';
 import { SolPrice } from './price';
@@ -88,7 +95,7 @@ import {
 } from './pump';
 import { SolRpc, type AccountInfo, type TxMeta } from './rpc';
 import { MAX_COMPUTE_UNITS, setComputeUnitLimit, setComputeUnitPrice } from './spl';
-import { compileMessage, serializeTransaction, type Instruction } from './tx';
+import { MAX_TX_BYTES, compileMessage, serializeTransaction, type Instruction } from './tx';
 import type { RelayClient } from '../trade/relay';
 import { SolBridgeFlow } from './bridge';
 import {
@@ -148,6 +155,11 @@ export interface SolanaDeps {
    * trade again before it signs.
    */
   sign?: (req: SolSignRequest) => Promise<Uint8Array>;
+  /**
+   * The block engines, for MEV protection: trades then go to them alone, each with a tip.
+   * Only the extension has them; without them, trades are sent as before.
+   */
+  engines?: PrivateSender;
   now: () => number;
 }
 
@@ -272,6 +284,11 @@ export interface SolLegJob {
   settled?: (meta: TxMeta | null) => void;
   /** The trade it is, for a signer that checks it again (the Nesty website's). */
   intent?: SolTradeIntent;
+  /**
+   * MEV protection's tip, for a trade that goes privately: the transaction then pays it to
+   * the block engine and goes to the engines alone, never to a public RPC.
+   */
+  tipLamports?: bigint;
   gs: GlobalSettings;
   ss: SolanaSettings;
 }
@@ -1225,12 +1242,17 @@ export class SolanaService {
         priorityGwei: ss.priorityFeeSol,
         customPriorityGwei: ss.customPriorityFeeSol,
         priorityApplies: true,
-        mev: {
-          supported: false,
-          enabled: false,
-          configured: false,
-          reason: 'Not offered on Solana.',
-        },
+        mev: this.d.engines
+          ? {
+              supported: true,
+              enabled: ss.mevEnabled,
+              configured: true,
+              tip: formatUnits(
+                tipLamports(priorityLamports(ss)),
+                SOLANA.nativeCurrency.decimals,
+              ),
+            }
+          : { supported: false, enabled: false, configured: false, reason: 'Not offered here.' },
         maxTaxBps: 10_000,
       },
       global: {
@@ -1499,7 +1521,13 @@ export class SolanaService {
     return {
       slippageBps: ss.slippageBps,
       prioritySol: { level: ss.priority, sol: solanaPriorityFee(ss) },
+      ...(this.d.engines && { mev: ss.mevEnabled }),
     };
+  }
+
+  /** The tip each trade transaction pays the block engine: 0 while MEV protection is off. */
+  private tip(ss: SolanaSettings): bigint {
+    return this.d.engines && ss.mevEnabled ? tipLamports(priorityLamports(ss)) : 0n;
   }
 
   // ── trading ───────────────────────────────────────────────────────────────
@@ -1812,6 +1840,7 @@ export class SolanaService {
       record?: boolean;
     },
   ): Promise<void> {
+    const tip = this.tip(p.ss);
     const ctx = {
       wallet: p.wallet.solana,
       mint: p.mint,
@@ -1819,6 +1848,7 @@ export class SolanaService {
       side: p.side,
       maxSpend: p.maxSpend,
       maxPriorityLamports: p.maxPriorityLamports,
+      maxTipLamports: tip,
       payUnit: { symbol: p.pay.symbol, decimals: p.pay.decimals },
     };
     return this.runLeg(st, i, {
@@ -1826,6 +1856,7 @@ export class SolanaService {
       instructions: p.instructions,
       units: tradeUnits(p.route, p.side, p.amount),
       validate: (ixs) => validateTrade(ixs, ctx),
+      ...(tip > 0n && { tipLamports: tip }),
       intent: {
         kind: 'trade',
         mint: p.mint,
@@ -1904,8 +1935,8 @@ export class SolanaService {
         amount: p.amount,
         pay: p.sol,
         instructions: swap.instructions,
-        // The coin's buy after it pays its network fee in SOL too.
-        spend: swap.spend + priorityLamports(p.ss),
+        // The coin's buy after it pays its network fee (and any tip) in SOL too.
+        spend: swap.spend + priorityLamports(p.ss) + this.tip(p.ss),
         gs: p.gs,
         ss: p.ss,
         maxSpend: p.maxSpend,
@@ -2024,6 +2055,11 @@ export class SolanaService {
     try {
       const rpc = this.rpcFor(job.ss);
       const fee = priorityLamports(job.ss);
+      // A private trade tips the block engine and goes to the engines alone.
+      const engines = job.tipLamports ? this.d.engines : undefined;
+      const tip = engines ? (job.tipLamports ?? 0n) : 0n;
+      const tipTo = anyTipAccount();
+      let marked = tip > 0n;
       // A few random units make every transaction unique: an identical second click in the
       // same blockhash window would otherwise have the same signature and be dropped.
       let units = Math.min(MAX_COMPUTE_UNITS, job.units + Math.floor(Math.random() * 256));
@@ -2031,7 +2067,18 @@ export class SolanaService {
         setComputeUnitLimit(u),
         setComputeUnitPrice(microLamports(fee, u)),
         ...job.instructions,
+        ...(tip > 0n ? [tipInstruction(job.wallet.solana, tip, tipTo, marked)] : []),
       ];
+      // The marker against sandwiches goes in while the transaction still fits with it (a
+      // route of several hops is near the size limit).
+      if (marked && !fits(job.wallet.solana, withBudget(units))) marked = false;
+      if (tip > 0n && !fits(job.wallet.solana, withBudget(units))) {
+        leg.status = 'failed';
+        leg.error = 'Too large to send privately. Turn off MEV protection to send it.';
+        this.update(st);
+        job.settled?.(null);
+        return;
+      }
       let ixs = withBudget(units);
       const verdict = job.validate(ixs);
       if (!verdict.ok) {
@@ -2045,7 +2092,7 @@ export class SolanaService {
 
       const [bh, short] = await Promise.all([
         this.blockhash(rpc),
-        job.shortfall ? job.shortfall(rpc, fee) : null,
+        job.shortfall ? job.shortfall(rpc, fee + tip) : null,
       ]);
       if (short) {
         leg.status = 'skipped';
@@ -2095,7 +2142,9 @@ export class SolanaService {
       leg.status = 'sending';
       leg.sig = sig;
       const tSend = this.d.now();
-      await rpc.broadcast(raw);
+      // Never a public RPC for a private trade: without an engine taking it, it fails.
+      if (engines) await engines.send(raw);
+      else await rpc.broadcast(raw);
       const tDone = this.d.now();
       leg.status = 'submitted';
       // What was read of the wallet ahead no longer counts (ReadAhead).
@@ -2108,7 +2157,15 @@ export class SolanaService {
         sendMs: tDone - tSend,
       };
       this.update(st);
-      void this.confirm(st, i, { rpc, raw, sig, ixs, lastValid: bh.lastValidBlockHeight, job });
+      void this.confirm(st, i, {
+        rpc,
+        raw,
+        sig,
+        ixs,
+        lastValid: bh.lastValidBlockHeight,
+        job,
+        engines,
+      });
     } catch (e) {
       leg.status = 'failed';
       leg.error = e instanceof AggregateError ? shortErr(e.errors[0]) : shortErr(e);
@@ -2157,7 +2214,10 @@ export class SolanaService {
       : null;
   }
 
-  /** Waits for the transaction, re-sending it until it lands or its blockhash expires. */
+  /**
+   * Waits for the transaction, re-sending it until it lands or its blockhash expires: a
+   * private one to the block engines alone.
+   */
   private async confirm(
     st: SolTicket,
     i: number,
@@ -2168,6 +2228,8 @@ export class SolanaService {
       ixs: Instruction[];
       lastValid: number;
       job: SolLegJob;
+      /** Set when it went privately. */
+      engines: PrivateSender | undefined;
     },
   ): Promise<void> {
     const leg = st.ticket.legs[i] as TicketLeg;
@@ -2196,14 +2258,18 @@ export class SolanaService {
       const now = this.d.now();
       if (now - lastSend >= REBROADCAST_MS) {
         lastSend = now;
-        void p.rpc.broadcast(p.raw).catch(() => undefined);
+        if (p.engines) p.engines.resend(p.raw);
+        else void p.rpc.broadcast(p.raw).catch(() => undefined);
       }
       if (now - heightAt >= 4_000) {
         heightAt = now;
         const height = await p.rpc.getBlockHeight().catch(() => null);
         if (height !== null && height > p.lastValid && !status) {
           leg.status = 'failed';
-          leg.error = 'Expired before it landed. Try a higher priority fee.';
+          // The engines drop a private trade that would fail: then it never lands.
+          leg.error = p.engines
+            ? 'Not landed before it expired, so nothing was paid. Try again, or raise the priority fee.'
+            : 'Expired before it landed. Try a higher priority fee.';
           this.update(st);
           p.job.settled?.(null);
           return;
@@ -2233,6 +2299,8 @@ export class SolanaService {
           landed = meta;
           const out = job.delivered?.(meta) ?? 0n;
           if (out > 0n) leg.amountOut = out.toString();
+          const tip = tipPaid(meta);
+          if (tip > 0n) leg.tipLamports = tip.toString();
         }
         this.update(st);
         break;
@@ -2469,6 +2537,19 @@ function minAfter(amount: bigint, bps: number): bigint {
 /** The priority fee each transaction pays, in lamports. */
 const priorityLamports = (ss: SolanaSettings): bigint =>
   parseUnits(solanaPriorityFee(ss), SOLANA.nativeCurrency.decimals);
+
+/** Any blockhash: a message's size does not depend on it. */
+const ANY_BLOCKHASH = base58.encode(new Uint8Array(32));
+
+/** Whether a transaction of `ixs`, paid and signed by `payer` alone, fits on the wire. */
+function fits(payer: SolAddress, ixs: readonly Instruction[]): boolean {
+  try {
+    const m = compileMessage(payer, ixs, ANY_BLOCKHASH);
+    return 1 + 64 * m.numSigners + m.bytes.length <= MAX_TX_BYTES;
+  } catch {
+    return false;
+  }
+}
 
 /** Per-unit price that makes `units` of compute cost `feeLamports` in total. */
 function microLamports(feeLamports: bigint, units: number): bigint {

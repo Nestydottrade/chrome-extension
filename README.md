@@ -54,7 +54,11 @@ reads (a DLMM pool beyond its own bitmap, an Orca swap past three tick arrays) q
 nothing rather than a guess. Every transaction passes the Solana validator (only
 Nesty's own instructions, accounts derived again from wallet and mint, the USD and
 priority-fee limits) and, with simulation on, is simulated before signing. The priority
-fee is set in SOL per transaction (Settings → Chains → Solana). Send, Distribute,
+fee is set in SOL per transaction (Settings → Chains → Solana). With MEV protection (on by
+default) every trade goes only to Jito's block engines as a bundle of its own
+(`sendTransaction` with `bundleOnly`), never to a public RPC, with a tip of a tenth of the
+priority fee and the `jitodontfront` marker; it lands whole or not at all, so a trade that
+would fail costs nothing. Transfers and bridges are sent as before. Send, Distribute,
 Collect, Bridge and exit plans work on Solana too; claiming pump.fun cashback does not
 yet. The built-in RPC (publicnode) refuses wallet-wide token reads, so the popup lists
 the Solana tokens you traded or added by mint; with your own RPC it also finds tokens
@@ -115,7 +119,7 @@ Four tabs along the bottom:
   change, multi-wallet mode, jitter and buy variance (each wallet buys up to a set share
   less, at random, never more), hotkeys, logos; per chain: quick-buy amounts, default
   slippage, Low/Medium/High priority fees, max-fee multiplier, custom RPC, WebSocket RPC,
-  MEV private RPC (Ethereum and BSC only).
+  MEV private RPC (Ethereum and BSC); on Solana, MEV protection on or off.
 
 **Which tokens show up.** Tokens you traded or transferred with Nesty, tokens you add
 with _Add token_, and tokens found by scanning `Transfer` logs to your wallets. Public
@@ -349,6 +353,7 @@ Tests: every legitimate plan from every venue passes; 19 named malicious payload
 | Malicious token metadata                     | Labels stripped of control/bidi/zero-width characters and capped; rendered as text only (ESLint bans `innerHTML` & co.).                                                                                                                                                                                                                                                                   |
 | Bad calldata (bug or tampering)              | Validator above; simulation before signing (default on).                                                                                                                                                                                                                                                                                                                                   |
 | Sandwich attacks (Ethereum, BSC)             | Sends go through a private RPC by default (Flashbots Protect, PancakeSwap MEV Guard); the panel shows "MEV: unprotected" whenever they would reach the public mempool.                                                                                                                                                                                                                     |
+| Sandwich attacks (Solana)                    | Trades go only to Jito's block engines by default, each as a bundle of its own with the `jitodontfront` marker (the engines refuse a bundle that puts another transaction first); the validator allows exactly one tip, to a listed tip account, at most the tip the settings make. A validator that runs its own queue is out of reach.                                              |
 | Fee mistakes and spikes                      | Gas is outside the USD trade limits, so the expected fee (simulated gas × base fee + tip) is checked against a separate gas limit (default $10) before anything is signed.                                                                                                                                                                                                                 |
 | Unlimited approvals                          | Spender limited to Permit2 or allowlisted routers/curves. Unlimited by default (one approval per token, for speed); can be switched to holdings × (1 + headroom). Permit2 permits exactly per sell.                                                                                                                                                                                        |
 | Lost/stolen device, idle browser             | Argon2id (~500 ms, params bound in AES-GCM AAD); a new wallet's password needs 10+ characters with an uppercase letter, a lowercase letter and a number; auto-lock; lock on browser close; unlock throttling.                                                                                                                                                                              |

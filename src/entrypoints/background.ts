@@ -11,6 +11,7 @@ import { handleMessage, type RouterDeps, type SiteControl } from '../background/
 import { classifySender } from '../background/sender';
 import { SiteService } from '../background/site';
 import { SettingsStore } from '../background/settings';
+import { BlockEngines } from '../background/solana/jito';
 import { SolanaService } from '../background/solana/service';
 import { broadcastRaw } from '../background/trade/broadcast';
 import { AggregatorCheck } from '../background/trade/aggregator-check';
@@ -325,6 +326,8 @@ export default defineBackground({
       // An outside address paid on an EVM chain must not be a token contract.
       evmTokenAt: async (chainId, address): Promise<string | null> =>
         (await engine.checkRecipient({ chainId, to: address }, [])).tokenSymbol,
+      // MEV protection: trades go privately to the block engines, with a tip.
+      engines: new BlockEngines(),
       now: Date.now,
     });
 

@@ -6,7 +6,12 @@ import { CHAINS, chainLabel } from '../../shared/chains';
 import { formatPercent, formatToken, parseDecimalInput } from '../../shared/format';
 import type { ApprovalView, SiteStatus, WsStatusView } from '../../shared/messages';
 import type { Address } from 'viem';
-import type { ChainSettings, GlobalSettings, SolanaSettings } from '../../shared/settings/defaults';
+import {
+  solanaTip,
+  type ChainSettings,
+  type GlobalSettings,
+  type SolanaSettings,
+} from '../../shared/settings/defaults';
 import { SOLANA, SOLANA_CHAIN_ID, isSolana } from '../../shared/solana';
 import { errorText, send } from '../../ui/api';
 import { NestMark } from '../../ui/NestMark';
@@ -797,6 +802,15 @@ function SolanaChain({ flash }: { flash: Flash }) {
             onSave={(v) => update({ customPriorityFeeSol: v })}
           />
         )}
+      </Group>
+
+      <Group title="MEV protection" tone="mev">
+        <Toggle
+          label="Send privately"
+          hint={`Trades go to a private block engine, so they cannot be sandwiched, and one that would fail is dropped for free. Each adds a tip of ${solanaTip(s)} ${sol}, a tenth of the priority fee.`}
+          checked={s.mevEnabled}
+          onChange={(v) => void update({ mevEnabled: v })}
+        />
       </Group>
 
       <Group title="Network">

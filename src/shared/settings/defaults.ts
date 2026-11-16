@@ -1,5 +1,7 @@
+import { formatUnits, parseUnits } from 'viem';
 import { z } from 'zod';
 import type { ChainConfig, GasPreset } from '../chains';
+import { SOLANA, tipLamports } from '../solana';
 
 /** Groups switch with Alt + 1–9, so there are at most nine. */
 export const MAX_WALLET_GROUPS = 9;
@@ -195,6 +197,11 @@ export const SolanaSettingsSchema = z.object({
   customPriorityFeeSol: SolDecimal,
   /** Optional user RPC, tried before the built-in public ones. */
   customRpc: HttpsUrl.or(z.literal('')),
+  /**
+   * MEV protection: trades go to the block engines alone, as bundles of their own, each with
+   * a tip (solanaTip). Transfers and bridges are sent as before.
+   */
+  mevEnabled: z.boolean(),
 });
 export type SolanaSettings = z.infer<typeof SolanaSettingsSchema>;
 
@@ -265,11 +272,18 @@ export const DEFAULT_SOLANA_SETTINGS: SolanaSettings = SolanaSettingsSchema.pars
   priorityFeeSol: { low: '0.0001', medium: '0.0005', high: '0.002' },
   customPriorityFeeSol: '0.0005',
   customRpc: '',
+  mevEnabled: true,
 });
 
 /** The priority fee a Solana trade pays right now, in SOL. */
 export function solanaPriorityFee(s: SolanaSettings): string {
   return s.priority === 'custom' ? s.customPriorityFeeSol : s.priorityFeeSol[s.priority];
+}
+
+/** The tip a Solana trade transaction adds while MEV protection is on, in SOL. */
+export function solanaTip(s: SolanaSettings): string {
+  const sol = SOLANA.nativeCurrency.decimals;
+  return formatUnits(tipLamports(parseUnits(solanaPriorityFee(s), sol)), sol);
 }
 
 /** The gas/slippage parameters a trade uses right now. */

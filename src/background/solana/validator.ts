@@ -1,5 +1,5 @@
 import type { BlockedAction } from '../../shared/panel';
-import type { SolAddress } from '../../shared/solana';
+import { MIN_TIP_LAMPORTS, type SolAddress } from '../../shared/solana';
 import { shortAddress as short } from '../../shared/wallet';
 import { createInstructions, type PumpCreate } from '../create/pump';
 import { act } from '../trade/actions';
@@ -40,6 +40,7 @@ import {
   wsolAccount,
 } from './spl';
 import { dexModule, type DexVenue } from './dex';
+import { TIP_ACCOUNTS, tipInstruction } from './jito';
 import { RELAY_SOLANA_PROGRAM, relayDepositNative } from './relay';
 import type { AccountMeta, Instruction } from './tx';
 
@@ -59,6 +60,11 @@ export interface SolValidationContext {
   maxSpend: bigint;
   /** Most lamports the priority fee may cost (from the max network fee). */
   maxPriorityLamports: bigint;
+  /**
+   * MEV protection's tip, when the trade goes privately: the most its one tip to the block
+   * engine may be. Absent or 0: no tip at all.
+   */
+  maxTipLamports?: bigint;
   /** The pay currency, for amounts in the actions. SOL when absent. */
   payUnit?: { symbol: string; decimals: number };
 }
@@ -145,12 +151,50 @@ function readBudget(ix: Instruction, b: Budget, actions: BlockedAction[]): void 
   } else actions.push(act('Compute budget', 'Unknown or repeated instruction'));
 }
 
-function checkPriority(b: Budget, maxLamports: bigint, actions: BlockedAction[]): void {
+/** The priority fee, held to the max network fee with any tip to the block engine. */
+function checkPriority(b: Budget, maxLamports: bigint, actions: BlockedAction[], tip = 0n): void {
   if (b.price === null) return;
   const limit = b.limit ?? 200_000n;
   const fee = (b.price * limit + 999_999n) / 1_000_000n;
   actions.push(
-    act(`Priority fee ${sol(fee)}`, fee > maxLamports ? 'Above your max network fee' : undefined),
+    act(
+      `Priority fee ${sol(fee)}`,
+      fee > maxLamports
+        ? 'Above your max network fee'
+        : fee + tip > maxLamports
+          ? 'Above your max network fee, with the tip'
+          : undefined,
+    ),
+  );
+}
+
+/** What a system instruction tips the block engine: exactly a tip jito.ts builds, or null. */
+function tipAmount(ix: Instruction, wallet: SolAddress): bigint | null {
+  const d = ix.data;
+  const to = ix.keys[1]?.pubkey;
+  if (d.length !== 12 || le(d, 0, 4) !== BigInt(SYSTEM_TRANSFER)) return null;
+  if (to === undefined || !TIP_ACCOUNTS.includes(to)) return null;
+  const lamports = le(d, 4, 8);
+  return [false, true].some((marked) =>
+    sameKeys(ix.keys, tipInstruction(wallet, lamports, to, marked).keys),
+  )
+    ? lamports
+    : null;
+}
+
+/** MEV protection's tip: one at most, at most what the user's settings make, at least the minimum. */
+function tipAction(tip: bigint, nth: number, max: bigint): BlockedAction {
+  return act(
+    `MEV protection tip ${sol(tip)}`,
+    nth > 1
+      ? 'Only one tip'
+      : max <= 0n
+        ? 'MEV protection is off'
+        : tip > max
+          ? 'Above your MEV protection tip'
+          : tip < MIN_TIP_LAMPORTS
+            ? "Below the block engine's minimum"
+            : undefined,
   );
 }
 
@@ -245,6 +289,8 @@ export function validateSolanaTx(
   const amount = (raw: bigint) => units(raw, unit.decimals, unit.symbol);
   const budget: Budget = { limit: null, price: null };
   let wrapped = 0n;
+  let tips = 0;
+  let tipped = 0n;
   let trades = 0;
   let spend = 0n;
   let amountIn = 0n;
@@ -280,6 +326,12 @@ export function validateSolanaTx(
         readBudget(ix, budget, actions);
         break;
       case SYSTEM_PROGRAM: {
+        const tip = tipAmount(ix, wallet);
+        if (tip !== null) {
+          tipped += tip;
+          actions.push(tipAction(tip, ++tips, ctx.maxTipLamports ?? 0n));
+          break;
+        }
         const wrap = solPay && wrapped === 0n ? wrapAmount(ix, wallet) : null;
         if (wrap === null) {
           actions.push(act('System program', 'Only one transfer to your own wrapped SOL'));
@@ -357,7 +409,7 @@ export function validateSolanaTx(
   if (wrapped !== (wraps ? spend : 0n)) {
     actions.push(act(`Wrap ${sol(wrapped)}`, 'Does not wrap what the trade spends'));
   }
-  checkPriority(budget, ctx.maxPriorityLamports, actions);
+  checkPriority(budget, ctx.maxPriorityLamports, actions, tipped);
   return { ok: actions.every((a) => a.ok), actions, spend, amountIn, minOut };
 }
 
@@ -454,7 +506,8 @@ export interface DexValidationContext extends Omit<SolValidationContext, 'route'
  * Runs before every signature of a trade on a pool of another program. The swap must be
  * exactly the call Nesty builds for this pool and wallet from the amounts it names;
  * around it, only the wallet's own accounts in the coin and the pool's quote may be
- * opened, and SOL wrapped (exactly what a buy spends) and unwrapped.
+ * opened, SOL wrapped (exactly what a buy spends) and unwrapped, and, when the trade goes
+ * privately, its one tip paid to the block engine.
  */
 export function validateDexTx(
   instructions: readonly Instruction[],
@@ -469,6 +522,8 @@ export function validateDexTx(
   const amount = (raw: bigint) => units(raw, unit.decimals, unit.symbol);
   const budget: Budget = { limit: null, price: null };
   let wrapped = 0n;
+  let tips = 0;
+  let tipped = 0n;
   let swaps = 0;
   let spend = 0n;
   let amountIn = 0n;
@@ -493,6 +548,12 @@ export function validateDexTx(
         readBudget(ix, budget, actions);
         break;
       case SYSTEM_PROGRAM: {
+        const tip = tipAmount(ix, wallet);
+        if (tip !== null) {
+          tipped += tip;
+          actions.push(tipAction(tip, ++tips, ctx.maxTipLamports ?? 0n));
+          break;
+        }
         const wrap = solPay && wrapped === 0n ? wrapAmount(ix, wallet) : null;
         if (wrap === null) {
           actions.push(act('System program', 'Only one transfer to your own wrapped SOL'));
@@ -555,7 +616,7 @@ export function validateDexTx(
   if (wrapped !== (solPay && ctx.side === 'buy' ? spend : 0n)) {
     actions.push(act(`Wrap ${sol(wrapped)}`, 'Does not wrap what the trade spends'));
   }
-  checkPriority(budget, ctx.maxPriorityLamports, actions);
+  checkPriority(budget, ctx.maxPriorityLamports, actions, tipped);
   return { ok: actions.every((a) => a.ok), actions, spend, amountIn, minOut };
 }
 

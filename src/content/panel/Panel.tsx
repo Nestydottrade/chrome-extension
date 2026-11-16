@@ -106,20 +106,35 @@ function TaxBadge({ tax, maxBps }: { tax: TaxView; maxBps: number }) {
 }
 
 /**
- * Protection as it really is: private only when it is on AND a private RPC is set;
- * otherwise sends go to the public mempool, which the user must see. Chains without a
- * public mempool show nothing.
+ * Protection as it really is: private only when it is on AND a private RPC is set (on
+ * Solana, the block engines); otherwise sends go out publicly, which the user must see.
+ * Chains without a public mempool show nothing.
  */
 function MevStatus({ mev }: { mev: PanelState['chain']['mev'] }) {
   if (!mev.supported) return null;
+  const sol = mev.tip !== undefined;
   if (mev.enabled && mev.configured)
-    return <span title="Sent through your private RPC">Private</span>;
+    return (
+      <span
+        title={
+          sol
+            ? `Sent privately, with a ${mev.tip} SOL tip per transaction`
+            : 'Sent through your private RPC'
+        }
+      >
+        Private
+      </span>
+    );
   return (
     <span
       class="imp-warn"
-      title="Transactions go to the public mempool and can be sandwiched. Turn on MEV protection (and set a private RPC) in Settings → Chains."
+      title={
+        sol
+          ? 'Trades go out publicly and can be sandwiched. Turn on MEV protection in Settings → Chains → Solana.'
+          : 'Transactions go to the public mempool and can be sandwiched. Turn on MEV protection (and set a private RPC) in Settings → Chains.'
+      }
     >
-      Public mempool
+      {sol ? 'Public send' : 'Public mempool'}
     </span>
   );
 }

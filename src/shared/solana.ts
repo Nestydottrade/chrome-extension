@@ -28,8 +28,37 @@ export const SOLANA = {
    * api.mainnet-beta.solana.com, which closes a socket that carries an Origin too.
    */
   wsUrl: 'wss://solana-rpc.publicnode.com',
+  /**
+   * Jito's block engines, one per region, where MEV protection sends trades: each goes out as
+   * a bundle of its own (sendTransaction with bundleOnly), never to a public RPC. The first
+   * answers from the region nearest the sender.
+   */
+  blockEngines: [
+    'https://mainnet.block-engine.jito.wtf',
+    'https://amsterdam.mainnet.block-engine.jito.wtf',
+    'https://dublin.mainnet.block-engine.jito.wtf',
+    'https://frankfurt.mainnet.block-engine.jito.wtf',
+    'https://london.mainnet.block-engine.jito.wtf',
+    'https://ny.mainnet.block-engine.jito.wtf',
+    'https://slc.mainnet.block-engine.jito.wtf',
+    'https://singapore.mainnet.block-engine.jito.wtf',
+    'https://tokyo.mainnet.block-engine.jito.wtf',
+  ],
   quickBuyAmounts: ['0.05', '0.1', '0.25', '0.5'],
 } as const;
+
+/** The least tip a block engine takes, in lamports. */
+export const MIN_TIP_LAMPORTS = 1_000n;
+
+/**
+ * The tip each trade transaction adds while MEV protection is on: a tenth of its priority
+ * fee (0.00001, 0.00005 and 0.0002 SOL at the default Low, Medium and High, as in the
+ * Android app), and at least the block engine's minimum.
+ */
+export function tipLamports(priorityLamports: bigint): bigint {
+  const tip = priorityLamports / 10n;
+  return tip > MIN_TIP_LAMPORTS ? tip : MIN_TIP_LAMPORTS;
+}
 
 export function isSolana(chainId: number | undefined | null): boolean {
   return chainId === SOLANA_CHAIN_ID;

@@ -112,6 +112,8 @@ export function ActivityDetail({ id, onBack }: { id: string; onBack: () => void 
   const confirmMs = swaps.find((l) => l.confirmMs !== undefined)?.confirmMs;
   const fees = t.legs.filter((l) => l.feeWei !== undefined);
   const feeTotal = fees.reduce((sum, l) => sum + BigInt(l.feeWei ?? '0'), 0n);
+  // Solana: the tips its private transactions paid the block engine.
+  const tips = t.legs.reduce((sum, l) => sum + BigInt(l.tipLamports ?? '0'), 0n);
   const set = t.settings;
 
   // The headline: what came in, and what it cost.
@@ -238,7 +240,11 @@ export function ActivityDetail({ id, onBack }: { id: string; onBack: () => void 
               {set.prioritySol.level.slice(1)} · {set.prioritySol.sol} SOL
             </Row>
           )}
-          {set?.mev !== undefined && <Row k="MEV protection">{set.mev ? 'On' : 'Off'}</Row>}
+          {set?.mev !== undefined && (
+            <Row k="MEV protection">
+              {set.mev ? (tips > 0n ? `On · tip ${native(tips)}` : 'On') : 'Off'}
+            </Row>
+          )}
           {fees.length > 0 && <Row k="Network fee">{native(feeTotal)}</Row>}
           {isTrade && <Row k="Platform fee">None</Row>}
         </Rows>

@@ -42,8 +42,17 @@ export interface PanelState {
     customPriorityGwei: string;
     /** False on first-come-first-served sequencers, where a priority fee does nothing. */
     priorityApplies: boolean;
-    /** `configured`: a private RPC is set, so the toggle can actually take effect. */
-    mev: { supported: boolean; enabled: boolean; configured: boolean; reason?: string };
+    /**
+     * `configured`: a private RPC is set, so the toggle can actually take effect. `tip`:
+     * Solana, the tip in SOL each trade transaction adds while it is on.
+     */
+    mev: {
+      supported: boolean;
+      enabled: boolean;
+      configured: boolean;
+      reason?: string;
+      tip?: string;
+    };
     /** Buys above this measured tax are refused. 10 000 = off. */
     maxTaxBps: number;
   };
@@ -123,6 +132,8 @@ export interface TicketLeg {
   confirmMs?: number;
   /** Network fee paid (wei), from the receipt. */
   feeWei?: string;
+  /** Solana: the MEV protection tip it paid (lamports), from the confirmed transaction. */
+  tipLamports?: string;
   /** Raw amount received: token units for buys, native wei for sells. */
   amountOut?: string;
   /**
