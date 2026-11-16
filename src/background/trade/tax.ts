@@ -196,7 +196,16 @@ export async function probeTax(
   return { transfer: { buyBps, sellBps }, venue: venueTax, declared, sellFails: false };
 }
 
-const TTL_MS = 5 * 60_000;
+/** How long a measurement is kept, and a probe that ran but could not measure (a buy reverted). */
+export const TAX_TTL_MS = 5 * 60_000;
+/**
+ * How long a probe the RPC failed is kept (refused or timed out): a later refresh measures
+ * again, so one refusal does not hide the tax for minutes.
+ *
+ * Private RPC: Robinhood Chain's public RPC answers simulations with 429 at times, while plain
+ * calls still pass (seen 2026-11-16 on this probe).
+ */
+export const TAX_RETRY_MS = 20_000;
 /** Below this, rounding in the pool math reads as tax. */
 const NOISE_BPS = 10;
 
@@ -215,7 +224,8 @@ export interface TaxRouting {
 type Probe = typeof probeTax;
 
 /**
- * Cached probes per (chain, token, pool). Owners can change taxes, so entries expire.
+ * Cached probes per (chain, token, pool). Owners can change taxes, so entries expire; a probe
+ * the RPC failed expires sooner.
  *
  * Aggregator routes are never probed themselves: a fill that falls short of the
  * aggregator's quote is the route's fault (a pool it misjudged), not a token tax, and
@@ -223,7 +233,7 @@ type Probe = typeof probeTax;
  * one measured on Nesty's own best pool for the token; with no such pool it is unknown.
  */
 export class TaxService {
-  private readonly cache = new Map<string, { at: number; info: TaxInfo | null }>();
+  private readonly cache = new Map<string, { until: number; info: TaxInfo | null }>();
   private readonly inflight = new Map<string, Promise<TaxInfo | null>>();
   /** Aggregator-routed token → the cache key of the own pool it was measured on. */
   private readonly measuredOn = new Map<string, string>();
@@ -247,7 +257,7 @@ export class TaxService {
       ? this.measuredOn.get(`${ctx.chain.id}:${route.pool.token.toLowerCase()}`)
       : this.key(ctx.chain.id, route.pool.token, route.pool.id);
     const hit = key === undefined ? undefined : this.cache.get(key);
-    if (!hit || ctx.now() - hit.at >= TTL_MS) return undefined;
+    if (!hit || ctx.now() >= hit.until) return undefined;
     return this.isAggregator(route) ? viaAggregator(hit.info) : hit.info;
   }
 
@@ -263,8 +273,8 @@ export class TaxService {
         .best(ctx, route.pool.token, 'buy', [amountIn], { own: true })
         .catch(() => [null]);
       if (!own) {
-        // Only the aggregator trades it: unknown, remembered like a failed probe.
-        this.cache.set(`none:${tokenKey}`, { at: ctx.now(), info: null });
+        // Only the aggregator trades it: unknown, kept as long as a measurement.
+        this.cache.set(`none:${tokenKey}`, { until: ctx.now() + TAX_TTL_MS, info: null });
         this.measuredOn.set(tokenKey, `none:${tokenKey}`);
         return null;
       }
@@ -275,17 +285,21 @@ export class TaxService {
     const key = this.key(ctx.chain.id, route.pool.token, route.pool.id);
     let p = this.inflight.get(key);
     if (!p) {
-      p = this.probe(ctx, route.venue, route.pool, amountIn, route.out)
-        .then(denoise)
-        .catch(() => null)
-        .then((info) => {
-          this.cache.set(key, { at: ctx.now(), info });
-          this.inflight.delete(key);
-          return info;
-        });
+      p = this.probe(ctx, route.venue, route.pool, amountIn, route.out).then(
+        (info) => this.keep(ctx, key, denoise(info), TAX_TTL_MS),
+        // The RPC failed, not the token: measured again soon.
+        () => this.keep(ctx, key, null, TAX_RETRY_MS),
+      );
       this.inflight.set(key, p);
     }
     return p;
+  }
+
+  /** Keeps a probe's result for `ttlMs` and ends its flight. */
+  private keep(ctx: VenueCtx, key: string, info: TaxInfo | null, ttlMs: number): TaxInfo | null {
+    this.cache.set(key, { until: ctx.now() + ttlMs, info });
+    this.inflight.delete(key);
+    return info;
   }
 }
 
