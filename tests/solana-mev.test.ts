@@ -23,7 +23,11 @@ import { setComputeUnitLimit, setComputeUnitPrice, transfer } from '../src/backg
 import type { Instruction } from '../src/background/solana/tx';
 import type { KeyValueStore } from '../src/background/vault/vault';
 import type { TradeTicket } from '../src/shared/panel';
-import { DEFAULT_SOLANA_SETTINGS, solanaTip } from '../src/shared/settings/defaults';
+import {
+  DEFAULT_SOLANA_SETTINGS,
+  solanaTip,
+  type TradePrefs,
+} from '../src/shared/settings/defaults';
 import { MIN_TIP_LAMPORTS, tipLamports } from '../src/shared/solana';
 import type { WalletAccount } from '../src/shared/wallet';
 
@@ -327,8 +331,16 @@ describe('Solana trades with MEV protection', () => {
       }
       throw new Error('never settled');
     };
-    const buy = () =>
-      svc.buy({ mint: COIN, amount: '0.1', walletIds: ['a'], mode: 'each', confirmed: false });
+    /** `prefs`: what a website's trade carries in place of the stored settings. */
+    const buy = (prefs?: TradePrefs) =>
+      svc.buy({
+        mint: COIN,
+        amount: '0.1',
+        walletIds: ['a'],
+        mode: 'each',
+        confirmed: false,
+        ...(prefs && { prefs }),
+      });
     return { svc, signed, engines, broadcast, settled, buy };
   }
 
@@ -382,5 +394,26 @@ describe('Solana trades with MEV protection', () => {
       expect(engines.send).not.toHaveBeenCalled();
       expect(t.legs[0]?.tipLamports).toBeUndefined();
     }
+  });
+
+  it("follows the switch a website's trade carries, over the stored one", async () => {
+    // Stored on, the site's trade says off: out in public, with no tip.
+    const off = await setup();
+    const t1 = await off.settled((await off.buy({ solana: { mevEnabled: false } })).id);
+    expect(t1.status).toBe('done');
+    expect(t1.settings?.mev).toBe(false);
+    expect(off.signed[0]?.instructions.some(isTip)).toBe(false);
+    expect(off.broadcast).toHaveBeenCalled();
+    expect(off.engines.send).not.toHaveBeenCalled();
+    // Stored off, the site's trade says on: privately, with the tip.
+    const on = await setup({ mev: false });
+    const t2 = await on.settled((await on.buy({ solana: { mevEnabled: true } })).id);
+    expect(t2.status).toBe('done');
+    expect(t2.settings?.mev).toBe(true);
+    expect(on.engines.send).toHaveBeenCalledTimes(1);
+    expect(on.broadcast).not.toHaveBeenCalled();
+    expect(t2.legs[0]?.tipLamports).toBe('50000');
+    // Nothing is stored: the panel still shows the user's own switch.
+    expect((await on.svc.panelState(COIN)).chain.mev.enabled).toBe(false);
   });
 });

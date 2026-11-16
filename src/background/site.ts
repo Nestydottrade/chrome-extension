@@ -178,6 +178,7 @@ export class SiteService {
       connected,
       limits: limitsOf(gs),
       trades: true,
+      solanaMev: true,
     };
   }
 

@@ -708,6 +708,7 @@ describe("the Nesty website's trades", () => {
   it('are made by the extension with the site’s settings, for a site that is in and unlocked', async () => {
     const { site, state, engine } = setup();
     expect((await site.hello(SITE)).trades).toBe(true);
+    expect((await site.hello(SITE)).solanaMev).toBe(true);
     await expect(site.buy(SITE, buy(), 7)).rejects.toEqual(new SiteError('not_connected'));
     await site.connect(SITE);
     state.unlocked = false;

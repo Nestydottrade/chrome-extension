@@ -106,6 +106,12 @@ export interface SiteHello {
    * their Solana forms). Absent from older versions, which only sign what the site built.
    */
   trades?: boolean;
+  /**
+   * The Solana trades it makes for the site go privately to the block engines while MEV
+   * protection is on, and `prefs.solana.mevEnabled` turns that on or off for each one.
+   * Absent from older versions, which refuse that field.
+   */
+  solanaMev?: boolean;
 }
 
 /** A buy the site asks for: the extension finds the route, checks, signs and sends it. */

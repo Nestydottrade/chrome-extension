@@ -75,6 +75,7 @@ describe('chain trade settings', () => {
           priority: 'custom',
           customPriorityFeeSol: '0.001',
           priorityFeeSol: { low: '0.0001', medium: '0.0002', high: '0.003' },
+          mevEnabled: false,
         },
         global: { jitterMaxMs: 100, buyVarianceBps: 500 },
       }).success,

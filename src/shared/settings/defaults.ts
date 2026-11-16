@@ -241,6 +241,7 @@ export const TradePrefsSchema = z
       priority: true,
       priorityFeeSol: true,
       customPriorityFeeSol: true,
+      mevEnabled: true,
     })
       .partial()
       .strict()
