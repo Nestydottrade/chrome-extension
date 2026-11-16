@@ -24,6 +24,7 @@ export const ethereum: ChainConfigInput = {
   ],
   dexscreenerSlug: 'ethereum',
   rpcUrls: ['https://ethereum-rpc.publicnode.com'],
+  wsUrl: 'wss://ethereum-rpc.publicnode.com',
   explorer: { name: 'Etherscan', url: 'https://etherscan.io' },
   feeModel: 'eip1559',
   nestyRouter: NESTY_ROUTER,
@@ -61,6 +62,7 @@ export const base: ChainConfigInput = {
   dexscreenerSlug: 'base',
   // Private RPC: mainnet.base.org refuses bursts (429); the next one answers (docs/private-rpc.md).
   rpcUrls: ['https://mainnet.base.org', 'https://base-rpc.publicnode.com'],
+  wsUrl: 'wss://base-rpc.publicnode.com',
   explorer: { name: 'Basescan', url: 'https://basescan.org' },
   feeModel: 'eip1559',
   nestyRouter: NESTY_ROUTER,
@@ -91,6 +93,7 @@ export const bsc: ChainConfigInput = {
   ],
   dexscreenerSlug: 'bsc',
   rpcUrls: ['https://bsc-dataseed.bnbchain.org', 'https://bsc-rpc.publicnode.com'],
+  wsUrl: 'wss://bsc-rpc.publicnode.com',
   explorer: { name: 'BscScan', url: 'https://bscscan.com' },
   feeModel: 'eip1559',
   // No default: BSC private RPCs (48 Club, BlockRazor, bloXroute…) need the user's own endpoint.
@@ -121,6 +124,9 @@ export const robinhood: ChainConfigInput = {
   ],
   dexscreenerSlug: 'robinhood',
   rpcUrls: ['https://rpc.mainnet.chain.robinhood.com'],
+  // Private RPC: Robinhood Chain's own RPC opens no socket (it closes with 1006), so the panel
+  // hears coins on BlockMachine's keyless one, "light production use" by its terms.
+  wsUrl: 'wss://rpc-robinhood.blockmachine.io',
   explorer: { name: 'RobinScan', url: 'https://robin.etherscan.io' },
   feeModel: 'arbitrum',
   nestyRouter: NESTY_ROUTER,
@@ -158,6 +164,7 @@ export const elysium: ChainConfigInput = {
   // out: it takes only Montra calls and posts them through the parent chain's inbox,
   // so a second copy sent there would be dropped and count against the wallet.
   rpcUrls: ['https://rpc.elysium.kinetiq.xyz'],
+  // Private RPC: no socket here (it closes with 1006), so the panel's quotes keep polling.
   // Its pages sit at the root: /explorer/... only redirects there.
   explorer: { name: 'Elysium Explorer', url: 'https://elysium.kinetiq.xyz' },
   feeModel: 'eip1559',

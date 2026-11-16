@@ -122,10 +122,22 @@ with _Add token_, and tokens found by scanning `Transfer` logs to your wallets. 
 RPCs refuse that scan (Nesty then retries after an hour), so a token bought outside Nesty
 only appears automatically with a custom RPC; otherwise add it once by address.
 
+**The panel hears its coin trade.** While the panel shows a coin and the wallet is
+unlocked, the background listens for the coin's trades over a socket: the token's
+`Transfer` logs on EVM chains; on Solana, the account its trades change (its pump.fun
+curve, its PumpSwap pool's coin vault, or its pool on another program). Each trade
+refreshes the quotes, price and PnL within about a second. Meanwhile the poll slows to
+every 2.5 s as a safety net, and goes back to its own pace whenever the socket stops
+answering. The socket is the chain's WebSocket RPC below when set, else a keyless public
+one (publicnode; BlockMachine on Robinhood Chain, whose own RPC opens none), closed a
+minute after the last panel stops watching. Elysium's RPC refuses sockets, so its panel
+keeps polling. Only the coin's address (on Solana, its curve's or pool's) goes there, as
+with any quote; prices are still read over HTTPS.
+
 **WebSocket RPC (optional).** With a `wss://` URL set, Nesty subscribes to new blocks:
-confirmations are noticed in the block they land, and the panel's quotes and fee
-estimates refresh every block. Quotes and sending still go over HTTPS, which also takes
-over if the socket drops. The status line under the field shows the connection.
+confirmations are noticed in the block they land, and fee estimates refresh every block.
+The panel hears its coin on this socket too. Quotes and sending still go over HTTPS, which
+also takes over if the socket drops. The status line under the field shows the connection.
 
 ### The Nesty website
 

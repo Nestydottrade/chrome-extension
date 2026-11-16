@@ -77,6 +77,11 @@ export const ChainConfigSchema = z.object({
   /** Chain slug on api.dexscreener.com (used only as a fallback to resolve v4 pool ids). */
   dexscreenerSlug: z.string().regex(/^[a-z0-9-]+$/),
   rpcUrls: z.array(HttpsUrl).min(1),
+  /**
+   * A keyless public socket that takes log subscriptions: an open panel hears its coin trade
+   * on it (the chain's WebSocket RPC setting goes first). Unset where none is known.
+   */
+  wsUrl: z.url({ protocol: /^wss$/ }).optional(),
   explorer: z.object({ name: z.string(), url: HttpsUrl }),
   /**
    * 'eip1559': priority fee buys ordering.

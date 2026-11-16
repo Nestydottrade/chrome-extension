@@ -73,6 +73,10 @@ export const panelApi = {
       ? send({ type: 'sol.panel.quotes', mint: t.mint, buyAmounts, sellBps })
       : send({ type: 'panel.quotes', chainId: t.chainId, token: t.token, buyAmounts, sellBps }),
 
+  /** Hear the coin trade (renewed while the panel shows it); tells whether it is heard now. */
+  watch: (t: TargetRef) => send({ type: 'panel.watch', chainId: t.chainId, token: tokenId(t) }),
+  unwatch: () => send({ type: 'panel.unwatch' }),
+
   buy: (t: TargetRef, a: TradeArgs & { amount: string; mode: 'each' | 'split' }) =>
     t.kind === 'solana'
       ? send({ type: 'sol.trade.buy', mint: t.mint, ...a })

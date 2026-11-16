@@ -19,6 +19,7 @@ import { isSolana, type SolAddress } from '../shared/solana';
 import { hasEvm } from '../shared/wallet';
 import { readBalances } from './balances';
 import type { HistoryStore } from './history';
+import type { CoinWatch } from './coin-watch';
 import type { LogoService } from './logos';
 import { WSOL_MINT } from './solana/address';
 import { panelQuotes, panelState } from './panel';
@@ -53,6 +54,8 @@ export interface RouterDeps {
   logos: LogoService;
   exits: ExitWatcher;
   wsStatus: (chainId: number) => WsStatus;
+  /** The coin each open panel watches, heard trading over a socket. */
+  coinWatch: Pick<CoinWatch, 'watch' | 'drop'>;
   /** Pings the chain's RPC endpoints so their connections stay open (throttled). */
   warmRpc: (chainId: number) => Promise<void>;
   /** Called after a chain's settings change (e.g. to (re)connect its WebSocket). */
@@ -109,6 +112,8 @@ const PASSIVE: ReadonlySet<RequestType> = new Set<RequestType>([
   'panel.getPrefs',
   'panel.setPrefs',
   'rpc.warm',
+  'panel.watch',
+  'panel.unwatch',
   'sites.status',
   'wallets.balances',
   'history.list',
@@ -445,6 +450,13 @@ async function dispatch(
       return panelQuotes(d, req);
     case 'rpc.warm':
       await d.warmRpc(req.chainId);
+      return null;
+    case 'panel.watch':
+      // As with the quotes, the coin stays private until the wallet is unlocked.
+      if (meta.tabId === undefined || !(await d.vault.isUnlocked())) return { live: false };
+      return d.coinWatch.watch(meta.tabId, req.chainId, req.token);
+    case 'panel.unwatch':
+      if (meta.tabId !== undefined) d.coinWatch.drop(meta.tabId);
       return null;
     case 'panel.selectWallets': {
       const accounts = await d.vault.listAccounts();

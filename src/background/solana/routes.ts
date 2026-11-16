@@ -1,6 +1,7 @@
 import type { SolAddress } from '../../shared/solana';
 import { dexModule, type DexVenue } from './dex';
 import {
+  bondingCurveAddress,
   buyInstructions,
   isSolQuote,
   pickRecipients,
@@ -34,6 +35,18 @@ import {
 export type SolRoute = { kind: 'pump'; pump: PumpRoute } | DexVenue;
 
 export const pumpRoute = (pump: PumpRoute): SolRoute => ({ kind: 'pump', pump });
+
+/**
+ * The account each trade of the route's coin changes: its pump.fun curve, its PumpSwap pool's
+ * coin vault (the pool account itself stays as it is), or its pool on another program. The
+ * panel hears the coin trade there.
+ */
+export function marketAccount(r: SolRoute): SolAddress | null {
+  if (r.kind !== 'pump') return r.pool;
+  const coin = r.pump.hops.at(-1);
+  if (!coin) return null;
+  return coin.kind === 'curve' ? bondingCurveAddress(coin.mint) : coin.pool.poolBaseTokenAccount;
+}
 
 /** What a route is bought with and sells into. */
 export const routePay = (r: SolRoute): QuoteAsset => (r.kind === 'pump' ? r.pump.pay : r.quote);

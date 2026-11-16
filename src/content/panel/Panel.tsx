@@ -63,6 +63,18 @@ const sameSet = (a: readonly string[], b: readonly string[]) =>
 const WARM_EVERY_MS = 20_000;
 const WARM_HIDDEN_MAX_MS = 10 * 60_000;
 const LOCKED_RECHECK_MS = 2_000;
+/** How often a shown panel renews its coin watch (the background lets one lapse after 15 s). */
+const WATCH_RENEW_MS = 5_000;
+/**
+ * The quotes' poll while the coin's trades are heard, a safety net: each trade refreshes them
+ * itself. Under the sell read-ahead's 4 s, so a sell between trades still finds the wallets'
+ * balances read.
+ */
+const HEARD_POLL_MS = 2_500;
+
+/** EVM addresses in any case; Solana mints exactly. */
+const sameToken = (a: string, b: string | null) =>
+  b !== null && (a.startsWith('0x') ? a.toLowerCase() === b.toLowerCase() : a === b);
 
 type Pending =
   { kind: 'buy'; amount: string; usd: string } | { kind: 'sell'; bps: number; usd: string };
@@ -169,6 +181,11 @@ export function Panel({ detection }: { detection: Detection | null }) {
   const typingInPanel = useRef(false);
   const quoteTick = useRef<(() => void) | null>(null);
   const chainIdRef = useRef<number | null>(null);
+  const tokenRef = useRef<string | null>(null);
+  // Whether the background hears the coin trade over a socket right now.
+  const [heard, setHeard] = useState(false);
+  const heardRef = useRef(false);
+  heardRef.current = heard;
   const sectionRef = useRef<HTMLElement>(null);
   const pickerRef = useRef<HTMLDivElement>(null);
 
@@ -194,6 +211,7 @@ export function Panel({ detection }: { detection: Detection | null }) {
   const net = t ? networkOf(t) : null;
   const tokenAddr = t ? tokenId(t) : null;
   chainIdRef.current = t?.chainId ?? null;
+  tokenRef.current = tokenAddr;
   // A Solana coin bought with a token (USDC, say) is priced and paid in that token.
   const native = state?.pay?.symbol ?? net?.native ?? 'ETH';
   const nd = state?.pay?.decimals ?? net?.nativeDecimals ?? 18;
@@ -235,13 +253,16 @@ export function Panel({ detection }: { detection: Detection | null }) {
     };
     let last = 0;
     quoteTick.current = () => {
-      // Block events can arrive several times a second on L2s; refresh at most ~1/s.
+      // Trades and blocks can come several times a second; refresh at most ~1/s.
       if (Date.now() - last < 900) return;
       last = Date.now();
       void tick();
     };
     void tick();
-    const id = setInterval(tick, state.global.quoteRefreshMs);
+    const every = heard
+      ? Math.max(state.global.quoteRefreshMs, HEARD_POLL_MS)
+      : state.global.quoteRefreshMs;
+    const id = setInterval(tick, every);
     return () => {
       alive = false;
       quoteTick.current = null;
@@ -255,7 +276,37 @@ export function Panel({ detection }: { detection: Detection | null }) {
     state?.locked,
     holding > 0n,
     prefs.hidden,
+    heard,
   ]);
+
+  // ── the coin's trades, heard over a socket: each refreshes the quotes at once, and the
+  // poll above slows to a safety net while they are heard. Unlocked only, as the quotes.
+  const hasState = state !== null;
+  useEffect(() => {
+    if (!t || !hasState || state?.locked || prefs.hidden) return;
+    let alive = true;
+    const renew = async () => {
+      // Hidden: the watch lapses, and starts again when the tab is back.
+      if (document.visibilityState !== 'visible') return;
+      const r = await panelApi.watch(t);
+      if (alive) setHeard(r.ok && r.data.live);
+    };
+    const onVisible = () => {
+      if (document.visibilityState !== 'visible') return;
+      void renew();
+      quoteTick.current?.();
+    };
+    void renew();
+    const id = setInterval(renew, WATCH_RENEW_MS);
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      alive = false;
+      clearInterval(id);
+      document.removeEventListener('visibilitychange', onVisible);
+      setHeard(false);
+      void panelApi.unwatch();
+    };
+  }, [t?.chainId, tokenAddr, hasState, state?.locked, prefs.hidden]);
 
   // ── RPC keep-alive: a click right after a pause should not wait for a new TLS
   // handshake. Runs while visible and for a while after the tab is hidden.
@@ -308,8 +359,16 @@ export function Panel({ detection }: { detection: Detection | null }) {
       if (sender.id !== browser.runtime.id) return;
       const ev = msg as PushEvent;
       if (ev?.kind === 'nesty.vault') void loadState();
-      // New block (WebSocket RPC): refresh quotes right away instead of waiting.
-      if (ev?.kind === 'nesty.block' && ev.chainId === chainIdRef.current) quoteTick.current?.();
+      // The coin traded: refresh quotes right away instead of waiting.
+      if (
+        ev?.kind === 'nesty.coin' &&
+        ev.chainId === chainIdRef.current &&
+        sameToken(ev.token, tokenRef.current)
+      )
+        quoteTick.current?.();
+      // New block (WebSocket RPC setting), while the coin's own trades are not heard.
+      if (ev?.kind === 'nesty.block' && ev.chainId === chainIdRef.current && !heardRef.current)
+        quoteTick.current?.();
       if (ev?.kind === 'nesty.ticket') {
         upsertTicket(ev.ticket);
         if (ev.ticket.legs.some((l) => l.status === 'confirmed')) void loadState();

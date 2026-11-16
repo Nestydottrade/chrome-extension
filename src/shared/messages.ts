@@ -534,6 +534,12 @@ export const RequestSchema = z.discriminatedUnion('type', [
     })
     .strict(),
   z.object({ type: z.literal('rpc.warm'), chainId: ChainId }).strict(),
+  // The panel hears its coin trade over a socket; renewed every few seconds while it shows.
+  z
+    .object({ type: z.literal('panel.watch'), ...AnyTarget })
+    .strict()
+    .refine(fitsNetwork, NOT_ITS_NETWORK),
+  z.object({ type: z.literal('panel.unwatch') }).strict(),
   z.object({ type: z.literal('panel.selectWallets'), walletIds: WalletIds }).strict(),
   // How a buy amount applies across several wallets: in each, or split between them.
   z.object({ type: z.literal('panel.setMultiWallet'), mode: z.enum(['each', 'split']) }).strict(),
@@ -819,6 +825,8 @@ export const CONTENT_TYPES: ReadonlySet<RequestType> = new Set<RequestType>([
   'panel.state',
   'panel.quotes',
   'rpc.warm',
+  'panel.watch',
+  'panel.unwatch',
   'panel.selectWallets',
   'panel.setMultiWallet',
   'panel.saveGroup',
@@ -1066,6 +1074,8 @@ export interface ResponseMap {
   'panel.state': PanelState;
   'panel.quotes': QuoteSet;
   'rpc.warm': null;
+  'panel.watch': { live: boolean };
+  'panel.unwatch': null;
   'panel.selectWallets': null;
   'panel.setMultiWallet': null;
   'panel.saveGroup': WalletGroup;
@@ -1187,4 +1197,6 @@ export type PushEvent =
   | { kind: 'nesty.ticket'; ticket: TradeTicket }
   /** To the Nesty website's tab only: a trade it asked for moved on. */
   | { kind: 'nesty.site.ticket'; ticket: TradeTicket }
-  | { kind: 'nesty.block'; chainId: number };
+  | { kind: 'nesty.block'; chainId: number }
+  /** The coin this tab's panel watches traded (heard over a socket; at most one a second). */
+  | { kind: 'nesty.coin'; chainId: number; token: string };

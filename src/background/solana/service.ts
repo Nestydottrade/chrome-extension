@@ -110,6 +110,7 @@ import {
   bestRoute,
   buyQuote,
   fundedBest,
+  marketAccount,
   noFill,
   pumpRoute,
   routePay,
@@ -300,6 +301,8 @@ const MAX_PRICED = 30;
 const MAX_KNOWN = 100;
 /** How long a coin's pools on other programs, as the index lists them, are kept. */
 const POOLS_TTL_MS = 60_000;
+/** How old a market the panel's coin watch may take: the panel's quotes keep it fresher. */
+const WATCH_MARKET_AGE_MS = 10_000;
 /** ...and how soon the index is asked again after it failed. */
 const POOLS_RETRY_MS = 10_000;
 /** Pools of other programs quoted per coin, the most liquid first. */
@@ -589,6 +592,13 @@ export class SolanaService {
     );
     const route = pickRoute(chain);
     return route ? { route, idle: routeIdle(route) } : { route: null, idle: null };
+  }
+
+  /** The account the coin's trades change, for the panel to hear it trade; null when none. */
+  async marketAccount(mint: SolAddress): Promise<SolAddress | null> {
+    const { routes } = await this.market(mint, WATCH_MARKET_AGE_MS);
+    const route = routes[0];
+    return route ? marketAccount(route) : null;
   }
 
   /**

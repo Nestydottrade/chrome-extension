@@ -32,6 +32,8 @@ import { panelQuotes } from '../background/panel';
 import { PortfolioService } from '../background/portfolio';
 import { createRelayClient } from '../background/trade/relay';
 import { WsHub } from '../background/ws';
+import { CoinWatch } from '../background/coin-watch';
+import type { SocketLike } from '../background/coin-socket';
 import { CHAINS } from '../shared/chains';
 import { getChain, type ChainConfig } from '../shared/chains';
 import type { PushEvent } from '../shared/messages';
@@ -40,7 +42,7 @@ import { SHARE_KEY, type PnlCard } from '../shared/pnl-card';
 import type { ChainSettings } from '../shared/settings/defaults';
 import { HOSTED_SITE_ORIGINS, isNestySite } from '../shared/nesty-site';
 import { ALERT_CHECK_MINUTES, alertPage } from '../shared/alerts';
-import { isSolana } from '../shared/solana';
+import { SOLANA, isSolana } from '../shared/solana';
 import { TRACK_CHECK_MINUTES } from '../shared/tracker';
 import { isBuiltinOrigin, siteScriptId } from '../shared/sites';
 
@@ -609,12 +611,37 @@ export default defineBackground({
       )?.id;
     };
 
+    // The coin each open panel shows, heard trading over a socket, so its quotes refresh right
+    // after a trade. The chain's WebSocket RPC setting goes first, else the chain's public
+    // socket, closed a minute after the last panel lets go. Only the coin's address (on Solana
+    // its curve's or pool's) goes there, as with any quote; nothing while the wallet is locked.
+    const coinWatch = new CoinWatch({
+      now: Date.now,
+      open: (url) => new WebSocket(url) as unknown as SocketLike,
+      socketUrl: async (chainId) => {
+        if (isSolana(chainId)) return SOLANA.wsUrl;
+        const chain = getChain(chainId);
+        if (!chain) return '';
+        return (await settings.getChain(chainId)).wsRpc || chain.wsUrl || '';
+      },
+      kindOf: (chainId) => (isSolana(chainId) ? 'solana' : 'evm'),
+      targetOf: async (chainId, token) =>
+        isSolana(chainId) ? solana.marketAccount(token) : token.toLowerCase(),
+      notify: (tabId, chainId, token) => {
+        const event: PushEvent = { kind: 'nesty.coin', chainId, token };
+        // No panel there any more: stop hearing its coin.
+        void browser.tabs.sendMessage(tabId, event).catch(() => coinWatch.drop(tabId));
+      },
+    });
+    browser.tabs.onRemoved.addListener((tabId) => coinWatch.drop(tabId));
+
     const deps: RouterDeps = {
       history,
       portfolio,
       logos,
       exits,
       wsStatus: (chainId) => ws.status(chainId),
+      coinWatch,
       warmRpc,
       onChainSettings: (chainId) => void syncWs(chainId),
       vault,
@@ -637,6 +664,7 @@ export default defineBackground({
         await browser.alarms.create(AUTOLOCK_ALARM, { delayInMinutes: autoLockMinutes });
       },
       async onLockChanged(unlocked) {
+        if (!unlocked) coinWatch.clear();
         if (unlocked) await deps.onActivity();
         else await browser.alarms.clear(AUTOLOCK_ALARM);
         await push({ kind: 'nesty.vault', unlocked });
@@ -658,7 +686,10 @@ export default defineBackground({
       if (alarm.name === ALERTS_ALARM) void alerts.check().catch(() => undefined);
       if (alarm.name === TRACKER_ALARM) void tracker.check().catch(() => undefined);
       if (alarm.name === AUTOLOCK_ALARM)
-        void vault.lock().then(() => push({ kind: 'nesty.vault', unlocked: false }));
+        void vault.lock().then(() => {
+          coinWatch.clear();
+          return push({ kind: 'nesty.vault', unlocked: false });
+        });
     });
 
     browser.runtime.onInstalled.addListener(({ reason }) => {

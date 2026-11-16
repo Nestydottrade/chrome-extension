@@ -23,6 +23,11 @@ export const SOLANA = {
    * refuses every request that carries an Origin, which an extension's always do.
    */
   rpcUrls: ['https://solana-rpc.publicnode.com'],
+  /**
+   * Public socket on the same host: an open panel hears its coin trade there. Not
+   * api.mainnet-beta.solana.com, which closes a socket that carries an Origin too.
+   */
+  wsUrl: 'wss://solana-rpc.publicnode.com',
   quickBuyAmounts: ['0.05', '0.1', '0.25', '0.5'],
 } as const;
 
