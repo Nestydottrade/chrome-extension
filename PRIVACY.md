@@ -1,6 +1,6 @@
 # Nesty privacy policy
 
-For the Nesty browser extension. Last updated 5 November 2026.
+For the Nesty browser extension. Last updated 18 November 2026.
 
 ## What Nesty collects
 
@@ -33,6 +33,10 @@ directly from your browser. Each sees your IP address and what it is asked for:
   the transactions you send. Every 30 seconds while you follow wallets, they also see those
   wallets' addresses and the transactions Nesty reads of them. In Settings you can set your
   own RPC for each chain, so public nodes no longer see your addresses.
+- **Block engines** get your Solana trades while MEV protection is on, as it is unless you
+  turn it off in Settings: each trade goes to them instead of the public nodes, and they hand
+  it to the validator making the next block, out of other traders' sight. They see your IP
+  address and the signed trade, which is public on its chain once it lands.
 - **A market data service** sees the tokens Nesty looks up, to find their pools and prices:
   among them, every 30 seconds while you have price alerts, the tokens they are for, and the
   tokens the wallets you follow trade.
@@ -55,8 +59,8 @@ directly from your browser. Each sees your IP address and what it is asked for:
 
 Each of these services runs under its own privacy policy. Nesty sells nothing, and shares
 nothing with them beyond these requests, all made over encrypted connections (HTTPS, or WSS
-for a WebSocket RPC you set). The transactions you send are public on their blockchain, as
-with any wallet.
+for live connections to the nodes). The transactions you send are public on their blockchain,
+as with any wallet.
 
 Nesty's use of data follows the Chrome Web Store User Data Policy, including its Limited
 Use requirements.
