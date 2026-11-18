@@ -1,4 +1,4 @@
-import { PANEL_FONT, PANEL_FONT_NUM } from './fonts';
+import { PANEL_FONT } from './fonts';
 import exitPlanCss from '../../ui/exit-plan.css?inline';
 import { PANEL_GAP, PANEL_WIDTH, TOASTS_WIDTH } from './layout';
 
@@ -6,8 +6,8 @@ import { PANEL_GAP, PANEL_WIDTH, TOASTS_WIDTH } from './layout';
 //
 // Look: "flight deck". A dark slate base (it sits on dark terminals, so it stays dark),
 // Nesty's green for focus and the moment a trade fires, mint for buys and rose for
-// sells. Text is Barlow; numbers, keys and headings Barlow Semi Condensed (both
-// registered by fonts.ts), falling back to Bahnschrift / system UI.
+// sells. Text, numbers, keys and headings are Inter (registered by fonts.ts), as on
+// nesty.trade, falling back to system UI.
 export const PANEL_CSS = `
 :host { all: initial; }
 * { box-sizing: border-box; }
@@ -17,7 +17,7 @@ export const PANEL_CSS = `
   --flash: #2ee6a8; --flash-hot: #6af0c3; --buy: #3ee0a4; --sell: #ff7d94; --warn: #ffb547; --focus: #2ee6a8;
   --buy-bg: #11231d; --buy-line: #1f4a3a; --buy-key: #1b3a2f;
   --sell-bg: #24141b; --sell-line: #4a2430; --sell-key: #3a1d27;
-  --num: "${PANEL_FONT_NUM}", "Bahnschrift", "DIN Alternate", ui-sans-serif, system-ui, sans-serif;
+  --num: "${PANEL_FONT}", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
   --ui: "${PANEL_FONT}", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
   --ease-out: cubic-bezier(.22, 1, .36, 1); --ease-spring: cubic-bezier(.34, 1.56, .64, 1);
 }

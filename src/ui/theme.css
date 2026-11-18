@@ -1,12 +1,6 @@
-/* Barlow for text, Barlow Semi Condensed for numbers, keys and headings. Bundled, so no
-   request leaves the extension. Latin only: the UI is English. */
-@import '@fontsource/barlow/latin-400.css';
-@import '@fontsource/barlow/latin-500.css';
-@import '@fontsource/barlow/latin-600.css';
-@import '@fontsource/barlow/latin-700.css';
-@import '@fontsource/barlow-semi-condensed/latin-500.css';
-@import '@fontsource/barlow-semi-condensed/latin-600.css';
-@import '@fontsource/barlow-semi-condensed/latin-700.css';
+/* Inter for text, numbers, keys and headings, as on nesty.trade. Bundled, so no request
+   leaves the extension; a script's file loads only when a page shows its letters. */
+@import '@fontsource-variable/inter/wght.css';
 
 :root {
   --bg: #0f141d;
@@ -31,8 +25,8 @@
   --focus: #2ee6a8;
   --radius: 10px;
   --radius-lg: 14px;
-  --ui: 'Barlow', ui-sans-serif, system-ui, sans-serif;
-  --num: 'Barlow Semi Condensed', 'Barlow', 'Bahnschrift', ui-sans-serif, system-ui, sans-serif;
+  --ui: 'Inter Variable', ui-sans-serif, system-ui, sans-serif;
+  --num: 'Inter Variable', ui-sans-serif, system-ui, sans-serif;
   --mono: ui-monospace, 'JetBrains Mono', 'Cascadia Code', Consolas, monospace;
   /* Motion: quick and springy for presses, a little longer for screens. */
   --ease-out: cubic-bezier(0.22, 1, 0.36, 1);

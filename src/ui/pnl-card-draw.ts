@@ -53,8 +53,9 @@ const CHAIN_DOT: Record<string, string> = {
   elysium: '#97fce4',
 };
 
-const UI = "'Barlow', ui-sans-serif, system-ui, sans-serif";
-const NUM = "'Barlow Semi Condensed', 'Barlow', ui-sans-serif, system-ui, sans-serif";
+/** Inter, as the extension's pages load it (theme.css), for text and figures alike. */
+const UI = "'Inter Variable', ui-sans-serif, system-ui, sans-serif";
+const NUM = UI;
 const font = (weight: number, size: number, family = NUM) => `${weight} ${size}px ${family}`;
 
 /** The card's faces, loaded before it is drawn: a canvas does not wait for them. */
