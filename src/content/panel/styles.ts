@@ -66,7 +66,8 @@ export const PANEL_CSS = `
 .ib:hover { color: var(--text); background: var(--surface-2); }
 .ib:active { transform: scale(.9); }
 
-.body { padding: 14px; display: grid; gap: 14px; animation: rise .26s var(--ease-out); }
+/* One column no wider than the panel: a long row clips inside it instead of widening it. */
+.body { padding: 14px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; animation: rise .26s var(--ease-out); }
 @keyframes rise { from { opacity: 0; transform: translateY(5px); } }
 .row { display: flex; align-items: center; gap: 6px; }
 .muted { color: var(--muted); }
@@ -134,9 +135,9 @@ export const PANEL_CSS = `
 .wchips button:active { transform: scale(.95); }
 .wchips button[aria-pressed="true"] { border-color: var(--flash); background: #10251f; color: var(--flash); }
 .hold-dot { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--buy); }
-.pos-main { display: flex; justify-content: space-between; align-items: flex-end; gap: 12px; min-width: 0; }
+.pos-main { display: flex; justify-content: space-between; align-items: flex-end; gap: 8px; min-width: 0; }
 .pos-amt { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
-.pos-amt .big { font: 600 36px/1 var(--num); white-space: nowrap; }
+.pos-amt .big { font: 600 32px/1 var(--num); white-space: nowrap; }
 .pos-amt .muted { font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pnl { display: grid; justify-items: end; gap: 2px; flex: none; margin: -4px -7px; padding: 4px 7px; border: 0; border-radius: 7px; background: none; font: inherit; text-align: right; cursor: pointer; animation: rise .3s var(--ease-out); transition: background-color .12s ease, box-shadow .12s ease; }
 .pnl.up:hover { background: var(--buy-bg); box-shadow: inset 0 0 0 1px var(--buy-line); }
@@ -171,7 +172,7 @@ export const PANEL_CSS = `
 .edit:hover { color: var(--text); background: var(--surface); }
 .edit[aria-pressed="true"] { color: var(--flash); background: var(--surface); }
 .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
-.sells { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }
+.sells { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px; }
 
 /* trade keys: the panel's one loud element */
 .tb {
@@ -189,9 +190,9 @@ export const PANEL_CSS = `
 .tb.buy { background: var(--buy-bg); border-color: var(--buy-line); }
 .tb.buy kbd { background: var(--buy-key); color: #8fe9c5; }
 .tb.buy:hover:not(:disabled) { border-color: var(--buy); background: #132a22; }
-.tb.sell { gap: 4px; padding: 9px 9px 8px; background: var(--sell-bg); border-color: var(--sell-line); }
-.tb.sell .main { font-size: 18px; }
-.tb.sell .sub { font-size: 11px; }
+.tb.sell { gap: 4px; padding: 9px 6px 8px; background: var(--sell-bg); border-color: var(--sell-line); }
+.tb.sell .main { font-size: 17px; }
+.tb.sell .sub { font-size: 10.5px; }
 .tb.sell kbd { min-width: 16px; height: 16px; font-size: 10px; border-radius: 4px; background: var(--sell-key); color: #ffb3c1; }
 .tb.sell:hover:not(:disabled) { border-color: var(--sell); background: #2b1720; }
 .meter-row { display: flex; align-items: center; gap: 7px; font-size: 11px; font-weight: 600; }
@@ -239,7 +240,8 @@ export const PANEL_CSS = `
 .seg button { border: 0; background: var(--surface); padding: 3px 8px; cursor: pointer; color: var(--muted); }
 .seg button[aria-pressed="true"] { background: var(--flash); color: #04150d; font-weight: 700; }
 
-.summary { padding: 8px 11px; border-radius: 10px; background: var(--surface); border: 1px dashed var(--border-strong); font-family: var(--num); animation: rise .22s var(--ease-out); }
+/* Wraps between its parts (amounts, the price, the note), never inside one. */
+.summary { display: flex; flex-wrap: wrap; align-items: baseline; column-gap: 4px; padding: 8px 11px; border-radius: 10px; background: var(--surface); border: 1px dashed var(--border-strong); font-family: var(--num); animation: rise .22s var(--ease-out); }
 .card { border: 1px solid var(--border-strong); border-radius: 12px; padding: 11px 12px; background: var(--surface); display: grid; gap: 6px; animation: rise .24s var(--ease-out); }
 .card.danger { border-color: var(--sell-line); background: var(--sell-bg); }
 .card.warn { border-color: color-mix(in srgb, var(--warn) 45%, transparent); background: color-mix(in srgb, var(--warn) 7%, var(--surface)); }
@@ -247,9 +249,10 @@ export const PANEL_CSS = `
 .act .ok { color: var(--buy); } .act .no { color: var(--sell); }
 
 /* footer status */
-.status { display: flex; gap: 2px 10px; align-items: center; font-size: 12px; color: var(--light); border-top: 1px solid var(--border); background: #0c1119; padding: 11px 14px; border-radius: 0 0 18px 18px; }
+/* Wraps onto a second line when full. */
+.status { display: flex; flex-wrap: wrap; gap: 2px 10px; align-items: center; font-size: 12px; color: var(--light); border-top: 1px solid var(--border); background: #0c1119; padding: 11px 14px; border-radius: 0 0 18px 18px; }
 .status > span { white-space: nowrap; flex: none; }
-/* One line: the venue name gives way first (full name in its tooltip). */
+/* A venue name too long for a line ends in an ellipsis (full name in its tooltip). */
 .status > .venue { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .status > .sp { flex: 1; margin-left: -10px; }
 .status > .venue { margin-left: -4px; }
@@ -307,7 +310,7 @@ export const PANEL_CSS = `
 .t-sum { display: grid; gap: 3px; flex: 1; min-width: 0; }
 .t-done { color: var(--buy); font-size: 12px; font-weight: 700; }
 .toast.warn .t-done { color: var(--warn); }
-.t-big { font: 600 24px/1.05 var(--num); overflow-wrap: anywhere; }
+.t-big { font: 600 20px/1.05 var(--num); overflow-wrap: anywhere; }
 .t-line { color: var(--muted); font-size: 12px; }
 .t-speed { display: grid; gap: 8px; padding: 12px; border-radius: 12px; background: #0c1915; }
 .toast.warn .t-speed { background: #15120a; }
@@ -333,9 +336,10 @@ export const PANEL_CSS = `
 
 /* trade options: two segmented boxes */
 .opts { display: flex; gap: 8px; }
-.segbox { flex: 1; min-width: 0; display: flex; align-items: center; gap: 2px; padding: 3px; border-radius: 10px; background: var(--surface); }
+/* Boxes and choices share the room by their text, so a wider value (a custom 49%) still fits. */
+.segbox { flex: 1 1 auto; min-width: 0; display: flex; align-items: center; gap: 2px; padding: 3px; border-radius: 10px; background: var(--surface); }
 .seg-label { padding: 0 6px; color: var(--muted); font-size: 11px; font-weight: 600; }
-.opt { flex: 1; min-width: 0; height: 26px; padding: 0 2px; white-space: nowrap; border-radius: 7px; border: 0; background: none; color: var(--light); cursor: pointer; font: 600 12px/1 var(--ui); transition: color .12s ease, background-color .15s ease, transform .1s var(--ease-out); }
+.opt { flex: 1 1 auto; min-width: 0; height: 26px; padding: 0 2px; white-space: nowrap; border-radius: 7px; border: 0; background: none; color: var(--light); cursor: pointer; font: 600 12px/1 var(--ui); transition: color .12s ease, background-color .15s ease, transform .1s var(--ease-out); }
 .opt:hover:not(:disabled) { color: var(--text); background: var(--surface-2); }
 .opt:active:not(:disabled) { transform: scale(.92); }
 .opt[aria-pressed="true"] { color: #fff; font-weight: 700; background: var(--border-strong); animation: pick .26s var(--ease-spring); }
